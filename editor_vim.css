@@ -93,6 +93,6 @@ body[data-anki-vim-mode="visual"] #anki-vim-status {
 
 .anki-vim-field-outline,
 .anki-vim-field-active {
-  outline: 2px solid rgba(91, 140, 255, 0.85) !important;
-  outline-offset: 1px !important;
+  outline: none !important;
+  outline-offset: 0 !important;
 }

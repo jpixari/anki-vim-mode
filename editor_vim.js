@@ -1,6 +1,6 @@
 (function () {
     window.ankiVim = {
-        version: "debug-25-insert-shiftjk-pass-status-low",
+        version: "debug-26-no-inner-field-outline",
         mode: window.ankiVim?.mode || "normal",
         fieldIndex: window.ankiVim?.fieldIndex || 0,
         debugVisible: window.ankiVim?.debugVisible || false,
@@ -22,7 +22,7 @@
             this.installCursorTrackers();
             this.setMode(this.mode || "normal");
             console.log(
-                "[Anki Vim] initialized debug-25-insert-shiftjk-pass-status-low",
+                "[Anki Vim] initialized debug-26-no-inner-field-outline",
             );
         },
 
@@ -132,8 +132,8 @@
                 }
 
                 .anki-vim-field-active {
-                    outline: 2px solid rgba(91, 140, 255, 0.85) !important;
-                    outline-offset: 1px !important;
+                    outline: none !important;
+                    outline-offset: 0 !important;
                 }
 
                 .rich-text-editable,
@@ -222,11 +222,11 @@
         },
 
         installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV25) {
+            if (window.ankiVimKeyHandlerInstalledV26) {
                 return;
             }
 
-            window.ankiVimKeyHandlerInstalledV25 = true;
+            window.ankiVimKeyHandlerInstalledV26 = true;
 
             document.addEventListener(
                 "keydown",
@@ -260,11 +260,11 @@
         },
 
         installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV25) {
+            if (window.ankiVimCursorTrackersInstalledV26) {
                 return;
             }
 
-            window.ankiVimCursorTrackersInstalledV25 = true;
+            window.ankiVimCursorTrackersInstalledV26 = true;
 
             document.addEventListener(
                 "selectionchange",
