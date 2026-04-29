@@ -1,0 +1,98 @@
+#anki-vim-status {
+  position: fixed;
+
+  /*
+    Bottom-center status pill.
+  */
+  left: 50%;
+  bottom: 0px;
+  transform: translateX(-50%);
+
+  z-index: 2147483647;
+
+  min-width: 150px;
+  padding: 7px 16px;
+
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+
+  background: rgba(28, 28, 32, 0.88);
+  color: #f4f4f5;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  user-select: none;
+  pointer-events: none;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+body[data-anki-vim-mode="normal"] #anki-vim-status {
+  background: rgba(32, 36, 44, 0.9);
+  color: #f4f4f5;
+}
+
+body[data-anki-vim-mode="insert"] #anki-vim-status {
+  background: rgba(24, 95, 64, 0.92);
+  color: #ecfdf5;
+}
+
+body[data-anki-vim-mode="visual"] #anki-vim-status {
+  background: rgba(88, 60, 150, 0.92);
+  color: #f5f3ff;
+}
+
+#anki-vim-debug {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2147483647;
+
+  max-width: 620px;
+  max-height: 320px;
+  overflow: auto;
+
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+
+  background: rgba(17, 17, 20, 0.92);
+  color: #eeeeee;
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+#anki-vim-block-cursor {
+  position: fixed;
+  z-index: 2147483647;
+  background: black;
+  opacity: 0.85;
+  pointer-events: none;
+  width: 9px;
+  height: 18px;
+  mix-blend-mode: difference;
+}
+
+.anki-vim-field-outline,
+.anki-vim-field-active {
+  outline: 2px solid rgba(91, 140, 255, 0.85) !important;
+  outline-offset: 1px !important;
+}
