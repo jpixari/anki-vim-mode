@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# OS junk
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Virtualenvs
+.venv/
+venv/
+
+# Windows IDE
+.idea/
+.vscode/
+
+# Neovim
+*.swp
+*.swo
+*.swn
+*.swm
+*.un~
+Session.vim
+.nvim.lua
+
+# Emacs
+*~
+\#*\#
+.\#*
+auto-save-list/
+tramp
+.eshell/
+.elc
