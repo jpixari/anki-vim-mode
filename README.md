@@ -12,7 +12,7 @@ this add-on is intended for people who prefer keyboard-driven editing and want a
 - a visible mode indicator showing the current editing state
 - designed for fast, keyboard-heavy note editing
 
-## Current working keybindings
+## current working keybindings
 
 ### Mode switching
 
