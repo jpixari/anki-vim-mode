@@ -1,7 +1,8 @@
 {
   "name": "Anki Vim Mode",
   "package": "anki_vim_mode",
-  "ankiweb_id": null,
-  "author": "you",
+  "manifest_version": 3,
+  "mod": 2026042901,
+  "author": "ixari",
   "version": "0.1.0"
 }
