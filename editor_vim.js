@@ -2,7 +2,7 @@
 
 (function () {
     window.ankiVim = {
-        version: "debug-26-no-inner-field-outline",
+        version: "debug-27-refocus-contenteditable",
         mode: window.ankiVim?.mode || "normal",
         fieldIndex: window.ankiVim?.fieldIndex || 0,
         debugVisible: window.ankiVim?.debugVisible || false,
@@ -24,7 +24,7 @@
             this.installCursorTrackers();
             this.setMode(this.mode || "normal");
             console.log(
-                "[Anki Vim] initialized debug-26-no-inner-field-outline",
+                "[Anki Vim] initialized debug-27-refocus-contenteditable",
             );
         },
 
@@ -224,11 +224,11 @@
         },
 
         installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV26) {
+            if (window.ankiVimKeyHandlerInstalledV27) {
                 return;
             }
 
-            window.ankiVimKeyHandlerInstalledV26 = true;
+            window.ankiVimKeyHandlerInstalledV27 = true;
 
             document.addEventListener(
                 "keydown",
@@ -262,18 +262,58 @@
         },
 
         installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV26) {
+            if (window.ankiVimCursorTrackersInstalledV27) {
                 return;
             }
 
-            window.ankiVimCursorTrackersInstalledV26 = true;
+            window.ankiVimCursorTrackersInstalledV27 = true;
 
             document.addEventListener(
                 "selectionchange",
                 function () {
-                    if (window.ankiVim && window.ankiVim.mode === "normal") {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldIndexFromSelection();
+
+                    if (window.ankiVim.mode === "normal") {
                         window.ankiVim.drawBlockCursorSoon();
                     }
+
+                    window.ankiVim.updateDebugIfVisible();
+                },
+                true,
+            );
+
+            document.addEventListener(
+                "focusin",
+                function () {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldIndexFromActiveElement();
+                    window.ankiVim.updateDebugIfVisible();
+                },
+                true,
+            );
+
+            document.addEventListener(
+                "mouseup",
+                function () {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldIndexFromSelection();
+                    window.ankiVim.syncLineIndexFromCaret();
+
+                    if (window.ankiVim.mode === "normal") {
+                        window.ankiVim.drawBlockCursorSoon();
+                    }
+
+                    window.ankiVim.updateDebugIfVisible();
                 },
                 true,
             );
@@ -332,6 +372,7 @@
                     event.preventDefault();
                     event.stopPropagation();
                     this.lastAction = "insert -> normal";
+                    this.syncLineIndexFromCaret();
                     this.setMode("normal");
                     return false;
                 }
@@ -577,6 +618,104 @@
             return this.candidateFields();
         },
 
+        fieldByIndex: function (index) {
+            const fields = this.fields();
+
+            if (fields.length === 0) {
+                return null;
+            }
+
+            let safeIndex = index;
+
+            if (safeIndex === undefined || safeIndex === null) {
+                safeIndex = this.fieldIndex || 0;
+            }
+
+            safeIndex = Math.max(
+                0,
+                Math.min(Number(safeIndex) || 0, fields.length - 1),
+            );
+            this.fieldIndex = safeIndex;
+
+            return fields[safeIndex];
+        },
+
+        updateFieldIndexFromActiveElement: function () {
+            const fields = this.fields();
+            const active = document.activeElement;
+
+            if (!active) {
+                return false;
+            }
+
+            for (let i = 0; i < fields.length; i++) {
+                const container = this.fieldContainer(fields[i]);
+                const control = this.editorControl(fields[i]);
+
+                if (
+                    fields[i] === active ||
+                    fields[i].contains(active) ||
+                    control === active ||
+                    (container && container.contains(active))
+                ) {
+                    this.fieldIndex = i;
+                    this.syncPythonCurrentField(i);
+                    return true;
+                }
+            }
+
+            return false;
+        },
+
+        updateFieldIndexFromSelection: function () {
+            const fields = this.fields();
+            const sel = window.getSelection();
+
+            if (!sel || sel.rangeCount === 0) {
+                return false;
+            }
+
+            let node = sel.getRangeAt(0).startContainer;
+
+            if (node && node.nodeType === Node.TEXT_NODE) {
+                node = node.parentElement;
+            }
+
+            while (node && node !== document.body) {
+                for (let i = 0; i < fields.length; i++) {
+                    const container = this.fieldContainer(fields[i]);
+
+                    if (
+                        fields[i] === node ||
+                        fields[i].contains(node) ||
+                        (container && container.contains(node))
+                    ) {
+                        this.fieldIndex = i;
+                        this.syncPythonCurrentField(i);
+                        return true;
+                    }
+                }
+
+                node = node.parentElement;
+            }
+
+            return false;
+        },
+
+        syncLineIndexFromCaret: function () {
+            const field =
+                this.currentField() || this.fieldByIndex(this.fieldIndex);
+
+            if (!field) {
+                return;
+            }
+
+            const text = this.getFieldPlainText(field);
+            const caret = this.getCaretOffsetInField(field);
+
+            this.lineIndexHint = this.lineIndexFromOffset(text, caret);
+        },
+
         fieldContainer: function (field) {
             let node = field;
 
@@ -723,71 +862,26 @@
             return String(text).replace(/\n$/, "");
         },
 
-        getTextRoot: function (field) {
-            if (!field) {
-                return null;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                return control;
-            }
-
-            return field;
-        },
-
         currentField: function () {
             const fields = this.fields();
-            const active = document.activeElement;
-
-            for (let i = 0; i < fields.length; i++) {
-                const container = this.fieldContainer(fields[i]);
-                const control = this.editorControl(fields[i]);
-
-                if (
-                    fields[i] === active ||
-                    fields[i].contains(active) ||
-                    control === active ||
-                    (container && container.contains(active))
-                ) {
-                    this.fieldIndex = i;
-                    return fields[i];
-                }
-            }
-
-            const sel = window.getSelection();
-
-            if (sel && sel.rangeCount > 0) {
-                let node = sel.getRangeAt(0).startContainer;
-
-                if (node && node.nodeType === Node.TEXT_NODE) {
-                    node = node.parentElement;
-                }
-
-                while (node && node !== document.body) {
-                    for (let i = 0; i < fields.length; i++) {
-                        const container = this.fieldContainer(fields[i]);
-
-                        if (
-                            fields[i] === node ||
-                            fields[i].contains(node) ||
-                            (container && container.contains(node))
-                        ) {
-                            this.fieldIndex = i;
-                            return fields[i];
-                        }
-                    }
-
-                    node = node.parentElement;
-                }
-            }
 
             if (fields.length === 0) {
                 return null;
             }
 
-            this.fieldIndex = Math.min(this.fieldIndex, fields.length - 1);
+            if (this.updateFieldIndexFromActiveElement()) {
+                return fields[this.fieldIndex];
+            }
+
+            if (this.updateFieldIndexFromSelection()) {
+                return fields[this.fieldIndex];
+            }
+
+            this.fieldIndex = Math.max(
+                0,
+                Math.min(this.fieldIndex || 0, fields.length - 1),
+            );
+
             return fields[this.fieldIndex];
         },
 
@@ -802,8 +896,16 @@
         },
 
         sendPythonLineOp: function (op) {
-            const field = this.currentField() || this.fields()[this.fieldIndex];
+            const field =
+                this.currentField() || this.fieldByIndex(this.fieldIndex);
             const caretOffset = field ? this.getCaretOffsetInField(field) : 0;
+
+            if (field) {
+                this.lineIndexHint = this.lineIndexFromOffset(
+                    this.getFieldPlainText(field),
+                    caretOffset,
+                );
+            }
 
             const payload = {
                 op: op,
@@ -821,7 +923,9 @@
                         "sent python op " +
                         op +
                         " lineIndexHint=" +
-                        payload.lineIndexHint;
+                        payload.lineIndexHint +
+                        " caretOffset=" +
+                        payload.caretOffset;
                 } else {
                     this.lastAction = "python op failed: no pycmd";
                 }
@@ -866,28 +970,42 @@
 
             this.lastAction = result.action || result.error || "python op done";
 
+            const wantedFieldIndex = this.fieldIndex;
+            const wantedCaretOffset =
+                result.caretOffset !== undefined
+                    ? result.caretOffset
+                    : this.pythonCaretOffset || 0;
+
             const refocus = () => {
-                const fields = this.fields();
-                const field = fields[this.fieldIndex] || this.currentField();
+                const field = this.fieldByIndex(wantedFieldIndex);
 
-                if (field) {
-                    this.focusFieldElement(field, false);
-
-                    if (result.caretOffset !== undefined) {
-                        this.setCaretOffsetInField(field, result.caretOffset);
-                    }
-
-                    this.forceRefocusAndCursor(field);
+                if (!field) {
+                    this.lastAction += " | refocus failed: no field";
+                    this.updateDebugIfVisible();
+                    return;
                 }
 
+                this.focusFieldElement(field, false);
+
+                const restored = this.setCaretOffsetInField(
+                    field,
+                    wantedCaretOffset,
+                );
+
+                if (!restored) {
+                    this.focusFieldElement(field, false);
+                }
+
+                this.syncLineIndexFromCaret();
                 this.refreshFieldOutline();
                 this.drawBlockCursor();
                 this.updateDebugIfVisible();
             };
 
             setTimeout(refocus, 0);
-            setTimeout(refocus, 120);
-            setTimeout(refocus, 300);
+            setTimeout(refocus, 80);
+            setTimeout(refocus, 180);
+            setTimeout(refocus, 360);
         },
 
         nativeFocusField: function (index, end) {
@@ -984,15 +1102,9 @@
                 } catch (innerError) {}
             }
 
-            const range = document.createRange();
-            const sel = window.getSelection();
-
-            try {
-                range.selectNodeContents(field);
-                range.collapse(!end);
-                sel.removeAllRanges();
-                sel.addRange(range);
-            } catch (error) {}
+            const text = this.getFieldPlainText(field);
+            const offset = end ? text.length : 0;
+            this.setCaretOffsetInField(field, offset);
         },
 
         ensureField: function () {
@@ -1018,7 +1130,9 @@
 
         forceRefocusAndCursor: function (field) {
             const target =
-                field || this.currentField() || this.fields()[this.fieldIndex];
+                field ||
+                this.currentField() ||
+                this.fieldByIndex(this.fieldIndex);
 
             if (!target) {
                 return;
@@ -1054,17 +1168,6 @@
                 return;
             }
 
-            if (granularity === "line") {
-                if (direction === "forward") {
-                    this.lineIndexHint = (this.lineIndexHint || 0) + 1;
-                } else {
-                    this.lineIndexHint = Math.max(
-                        0,
-                        (this.lineIndexHint || 0) - 1,
-                    );
-                }
-            }
-
             const control = this.editorControl(field);
 
             if (control) {
@@ -1091,6 +1194,7 @@
                 this.lastAction = "move failed: " + error;
             }
 
+            this.syncLineIndexFromCaret();
             this.drawBlockCursorSoon();
         },
 
@@ -1206,6 +1310,14 @@
             }
 
             const range = sel.getRangeAt(0);
+
+            if (
+                !field.contains(range.startContainer) &&
+                field !== range.startContainer
+            ) {
+                return this.pythonCaretOffset || 0;
+            }
+
             const pre = document.createRange();
 
             try {
@@ -1218,6 +1330,10 @@
         },
 
         setCaretOffsetInField: function (field, offset) {
+            if (!field) {
+                return false;
+            }
+
             const control = this.editorControl(field);
 
             if (control) {
@@ -1241,7 +1357,90 @@
                 return true;
             }
 
-            return false;
+            const text = this.getFieldPlainText(field);
+            const wantedOffset = Math.max(
+                0,
+                Math.min(offset || 0, text.length),
+            );
+
+            try {
+                field.focus({ preventScroll: true });
+            } catch (error) {
+                try {
+                    field.focus();
+                } catch (innerError) {}
+            }
+
+            const range = document.createRange();
+            const sel = window.getSelection();
+
+            if (!sel) {
+                return false;
+            }
+
+            let remaining = wantedOffset;
+            let foundNode = null;
+            let foundOffset = 0;
+
+            const walker = document.createTreeWalker(
+                field,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function (node) {
+                        if (!node.nodeValue || node.nodeValue.length === 0) {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+
+                        return NodeFilter.FILTER_ACCEPT;
+                    },
+                },
+            );
+
+            let node = walker.nextNode();
+
+            while (node) {
+                const length = node.nodeValue.length;
+
+                if (remaining <= length) {
+                    foundNode = node;
+                    foundOffset = remaining;
+                    break;
+                }
+
+                remaining -= length;
+                node = walker.nextNode();
+            }
+
+            try {
+                if (foundNode) {
+                    range.setStart(foundNode, foundOffset);
+                    range.collapse(true);
+                } else {
+                    range.selectNodeContents(field);
+                    range.collapse(false);
+                }
+
+                sel.removeAllRanges();
+                sel.addRange(range);
+
+                this.lineIndexHint = this.lineIndexFromOffset(
+                    text,
+                    wantedOffset,
+                );
+                this.pythonCaretOffset = wantedOffset;
+
+                return true;
+            } catch (error) {
+                try {
+                    range.selectNodeContents(field);
+                    range.collapse(false);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    return true;
+                } catch (innerError) {
+                    return false;
+                }
+            }
         },
 
         getLineBounds: function (text, offset, includeNewline) {
@@ -1317,32 +1516,6 @@
             return false;
         },
 
-        getCurrentLineInfo: function (includeNewline) {
-            const field = this.ensureField();
-
-            if (!field) {
-                return null;
-            }
-
-            const text = this.getFieldPlainText(field);
-            const caretOffset = this.getCaretOffsetInField(field);
-            const bounds = this.getLineBounds(
-                text,
-                caretOffset,
-                !!includeNewline,
-            );
-            const selected = text.slice(bounds.start, bounds.end);
-
-            return {
-                field: field,
-                text: text,
-                caretOffset: caretOffset,
-                start: bounds.start,
-                end: bounds.end,
-                selected: selected,
-            };
-        },
-
         yankCurrentLine: function () {
             this.sendPythonLineOp("yy");
         },
@@ -1385,6 +1558,9 @@
                 return;
             }
 
+            const caret = this.getCaretOffsetInField(field);
+            this.visualAnchorOffset = caret;
+
             const sel = window.getSelection();
 
             if (!sel || sel.rangeCount === 0) {
@@ -1407,8 +1583,11 @@
         },
 
         exitVisualMode: function (collapseToStart) {
-            const field = this.currentField() || this.fields()[this.fieldIndex];
+            const savedFieldIndex = this.fieldIndex;
+            const field =
+                this.currentField() || this.fieldByIndex(savedFieldIndex);
             const control = field ? this.editorControl(field) : null;
+            let finalOffset = this.pythonCaretOffset || 0;
 
             if (control) {
                 const start = control.selectionStart || 0;
@@ -1421,11 +1600,13 @@
                     control.setSelectionRange(pos, pos);
                 } catch (error) {}
 
+                finalOffset = pos;
+
                 this.lineIndexHint = this.lineIndexFromOffset(
                     control.value || "",
                     pos,
                 );
-            } else {
+            } else if (field) {
                 const sel = window.getSelection();
 
                 if (sel && sel.rangeCount > 0) {
@@ -1433,6 +1614,7 @@
                     range.collapse(!!collapseToStart);
                     sel.removeAllRanges();
                     sel.addRange(range);
+                    finalOffset = this.getCaretOffsetInField(field);
                 }
             }
 
@@ -1441,7 +1623,23 @@
             this.visualAnchorOffset = null;
             document.body.dataset.ankiVimMode = "normal";
             this.updateStatus();
-            this.forceRefocusAndCursor(field);
+
+            const refocus = () => {
+                const target = this.fieldByIndex(savedFieldIndex) || field;
+
+                if (!target) {
+                    return;
+                }
+
+                this.setCaretOffsetInField(target, finalOffset);
+                this.forceRefocusAndCursor(target);
+                this.refreshFieldOutline();
+                this.drawBlockCursor();
+                this.updateDebugIfVisible();
+            };
+
+            setTimeout(refocus, 0);
+            setTimeout(refocus, 80);
         },
 
         extendVisualSelection: function (direction, granularity) {
@@ -1495,6 +1693,8 @@
                 console.log("[Anki Vim] visual extend failed", error);
                 this.lastAction = "visual extend failed: " + error;
             }
+
+            this.syncLineIndexFromCaret();
         },
 
         getSelectionText: function () {
@@ -1563,6 +1763,7 @@
                     start,
                 );
 
+                this.pythonCaretOffset = start;
                 this.lastAction =
                     "deleted selection: " + JSON.stringify(selected);
                 return;
@@ -1580,6 +1781,9 @@
 
             try {
                 document.execCommand("delete", false, null);
+                this.pythonCaretOffset = field
+                    ? this.getCaretOffsetInField(field)
+                    : this.pythonCaretOffset;
                 this.lastAction =
                     "deleted selection: " + JSON.stringify(this.yankText);
             } catch (error) {
@@ -1631,6 +1835,7 @@
             try {
                 sel.modify("move", "forward", "lineboundary");
                 document.execCommand("insertLineBreak");
+                this.syncLineIndexFromCaret();
                 this.setMode("insert");
                 this.lastAction = "opened line below";
             } catch (error) {
@@ -1792,6 +1997,43 @@
 
                     mirror.remove();
                     return rect;
+                } catch (error) {}
+            }
+
+            const sel = window.getSelection();
+
+            if (sel && sel.rangeCount > 0) {
+                try {
+                    const range = sel.getRangeAt(0).cloneRange();
+
+                    if (
+                        field.contains(range.startContainer) ||
+                        field === range.startContainer
+                    ) {
+                        range.collapse(true);
+
+                        let rect = range.getBoundingClientRect();
+
+                        if (
+                            (!rect || rect.width === 0) &&
+                            range.startContainer
+                        ) {
+                            const marker = document.createElement("span");
+                            marker.textContent = "\u200b";
+                            range.insertNode(marker);
+                            rect = marker.getBoundingClientRect();
+                            marker.remove();
+                        }
+
+                        if (rect && rect.top && rect.left) {
+                            return {
+                                left: rect.left,
+                                top: rect.top,
+                                width: Math.max(rect.width || 9, 9),
+                                height: Math.max(rect.height || 18, 18),
+                            };
+                        }
+                    }
                 } catch (error) {}
             }
 
