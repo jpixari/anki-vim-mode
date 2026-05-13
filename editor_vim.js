@@ -1,3 +1,5 @@
+// editor_vim.js
+
 (function () {
     window.ankiVim = {
         version: "debug-26-no-inner-field-outline",
