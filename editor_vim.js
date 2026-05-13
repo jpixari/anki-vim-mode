@@ -2,7 +2,7 @@
 
 (function () {
     window.ankiVim = {
-        version: "debug-27-refocus-contenteditable",
+        version: "debug-28-rect-line-detection",
         mode: window.ankiVim?.mode || "normal",
         fieldIndex: window.ankiVim?.fieldIndex || 0,
         debugVisible: window.ankiVim?.debugVisible || false,
@@ -23,9 +23,7 @@
             this.installKeyHandler();
             this.installCursorTrackers();
             this.setMode(this.mode || "normal");
-            console.log(
-                "[Anki Vim] initialized debug-27-refocus-contenteditable",
-            );
+            console.log("[Anki Vim] initialized debug-28-rect-line-detection");
         },
 
         cls: function (el) {
@@ -224,11 +222,11 @@
         },
 
         installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV27) {
+            if (window.ankiVimKeyHandlerInstalledV28) {
                 return;
             }
 
-            window.ankiVimKeyHandlerInstalledV27 = true;
+            window.ankiVimKeyHandlerInstalledV28 = true;
 
             document.addEventListener(
                 "keydown",
@@ -262,11 +260,11 @@
         },
 
         installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV27) {
+            if (window.ankiVimCursorTrackersInstalledV28) {
                 return;
             }
 
-            window.ankiVimCursorTrackersInstalledV27 = true;
+            window.ankiVimCursorTrackersInstalledV28 = true;
 
             document.addEventListener(
                 "selectionchange",
@@ -276,6 +274,7 @@
                     }
 
                     window.ankiVim.updateFieldIndexFromSelection();
+                    window.ankiVim.syncLineIndexFromCaret();
 
                     if (window.ankiVim.mode === "normal") {
                         window.ankiVim.drawBlockCursorSoon();
@@ -294,6 +293,7 @@
                     }
 
                     window.ankiVim.updateFieldIndexFromActiveElement();
+                    window.ankiVim.syncLineIndexFromCaret();
                     window.ankiVim.updateDebugIfVisible();
                 },
                 true,
@@ -711,9 +711,26 @@
             }
 
             const text = this.getFieldPlainText(field);
+            const visualLine = this.getCaretLineIndexByRect(field);
+
+            if (visualLine !== null && visualLine !== undefined) {
+                this.lineIndexHint = Math.max(
+                    0,
+                    Math.min(visualLine, text.split("\n").length - 1),
+                );
+
+                this.pythonCaretOffset = this.offsetForLineIndex(
+                    text,
+                    this.lineIndexHint,
+                );
+
+                return;
+            }
+
             const caret = this.getCaretOffsetInField(field);
 
             this.lineIndexHint = this.lineIndexFromOffset(text, caret);
+            this.pythonCaretOffset = caret;
         },
 
         fieldContainer: function (field) {
@@ -898,13 +915,34 @@
         sendPythonLineOp: function (op) {
             const field =
                 this.currentField() || this.fieldByIndex(this.fieldIndex);
-            const caretOffset = field ? this.getCaretOffsetInField(field) : 0;
+
+            let caretOffset = 0;
+            let text = "";
 
             if (field) {
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    this.getFieldPlainText(field),
-                    caretOffset,
-                );
+                text = this.getFieldPlainText(field);
+
+                const visualLine = this.getCaretLineIndexByRect(field);
+
+                if (visualLine !== null && visualLine !== undefined) {
+                    this.lineIndexHint = Math.max(
+                        0,
+                        Math.min(visualLine, text.split("\n").length - 1),
+                    );
+
+                    caretOffset = this.offsetForLineIndex(
+                        text,
+                        this.lineIndexHint,
+                    );
+                    this.pythonCaretOffset = caretOffset;
+                } else {
+                    caretOffset = this.getCaretOffsetInField(field);
+                    this.lineIndexHint = this.lineIndexFromOffset(
+                        text,
+                        caretOffset,
+                    );
+                    this.pythonCaretOffset = caretOffset;
+                }
             }
 
             const payload = {
@@ -1473,6 +1511,118 @@
             return text.slice(0, safeOffset).split("\n").length - 1;
         },
 
+        offsetForLineIndex: function (text, lineIndex) {
+            const lines = String(text || "").split("\n");
+            const safeLine = Math.max(
+                0,
+                Math.min(lineIndex || 0, lines.length - 1),
+            );
+
+            let offset = 0;
+
+            for (let i = 0; i < safeLine; i++) {
+                offset += lines[i].length + 1;
+            }
+
+            return offset;
+        },
+
+        lineHeightPx: function (field) {
+            try {
+                const style = window.getComputedStyle(field);
+                const lineHeight = parseFloat(style.lineHeight);
+
+                if (!Number.isNaN(lineHeight) && lineHeight > 0) {
+                    return lineHeight;
+                }
+
+                const fontSize = parseFloat(style.fontSize);
+
+                if (!Number.isNaN(fontSize) && fontSize > 0) {
+                    return fontSize * 1.2;
+                }
+            } catch (error) {}
+
+            return 20;
+        },
+
+        caretRectFromSelection: function (field) {
+            const sel = window.getSelection();
+
+            if (!field || !sel || sel.rangeCount === 0) {
+                return null;
+            }
+
+            const range = sel.getRangeAt(0).cloneRange();
+
+            if (
+                !field.contains(range.startContainer) &&
+                field !== range.startContainer
+            ) {
+                return null;
+            }
+
+            try {
+                range.collapse(true);
+
+                let rect = range.getBoundingClientRect();
+
+                if (rect && rect.top && rect.left) {
+                    return rect;
+                }
+
+                const marker = document.createElement("span");
+                marker.textContent = "\u200b";
+
+                range.insertNode(marker);
+                rect = marker.getBoundingClientRect();
+
+                marker.remove();
+
+                if (rect && rect.top && rect.left) {
+                    return rect;
+                }
+            } catch (error) {}
+
+            return null;
+        },
+
+        getCaretLineIndexByRect: function (field) {
+            if (!field) {
+                return null;
+            }
+
+            const control = this.editorControl(field);
+
+            if (control) {
+                const text = control.value || "";
+                const caret = control.selectionStart || 0;
+                return this.lineIndexFromOffset(text, caret);
+            }
+
+            const rect = this.caretRectFromSelection(field);
+
+            if (!rect) {
+                return null;
+            }
+
+            const fieldRect = field.getBoundingClientRect();
+            const style = window.getComputedStyle(field);
+
+            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
+            const lineHeight = this.lineHeightPx(field);
+
+            const text = this.getFieldPlainText(field);
+            const lineCount = Math.max(1, text.split("\n").length);
+
+            const relativeTop = rect.top - fieldRect.top - paddingTop;
+            let lineIndex = Math.round(relativeTop / lineHeight);
+
+            lineIndex = Math.max(0, Math.min(lineIndex, lineCount - 1));
+
+            return lineIndex;
+        },
+
         replaceFieldPlainText: function (
             field,
             newText,
@@ -2000,41 +2150,15 @@
                 } catch (error) {}
             }
 
-            const sel = window.getSelection();
+            const rect = this.caretRectFromSelection(field);
 
-            if (sel && sel.rangeCount > 0) {
-                try {
-                    const range = sel.getRangeAt(0).cloneRange();
-
-                    if (
-                        field.contains(range.startContainer) ||
-                        field === range.startContainer
-                    ) {
-                        range.collapse(true);
-
-                        let rect = range.getBoundingClientRect();
-
-                        if (
-                            (!rect || rect.width === 0) &&
-                            range.startContainer
-                        ) {
-                            const marker = document.createElement("span");
-                            marker.textContent = "\u200b";
-                            range.insertNode(marker);
-                            rect = marker.getBoundingClientRect();
-                            marker.remove();
-                        }
-
-                        if (rect && rect.top && rect.left) {
-                            return {
-                                left: rect.left,
-                                top: rect.top,
-                                width: Math.max(rect.width || 9, 9),
-                                height: Math.max(rect.height || 18, 18),
-                            };
-                        }
-                    }
-                } catch (error) {}
+            if (rect) {
+                return {
+                    left: rect.left,
+                    top: rect.top,
+                    width: Math.max(rect.width || 9, 9),
+                    height: Math.max(rect.height || 18, 18),
+                };
             }
 
             const r = field.getBoundingClientRect();
@@ -2163,6 +2287,7 @@
             const control = field ? this.editorControl(field) : null;
             const fieldText = field ? this.getFieldPlainText(field) : "";
             const caretOffset = field ? this.getCaretOffsetInField(field) : -1;
+            const rectLine = field ? this.getCaretLineIndexByRect(field) : null;
 
             const lines = [];
 
@@ -2184,6 +2309,7 @@
             lines.push("caretOffset: " + caretOffset);
             lines.push("pythonCaretOffset: " + this.pythonCaretOffset);
             lines.push("lineIndexHint: " + this.lineIndexHint);
+            lines.push("rectLineIndex: " + rectLine);
             lines.push("fieldText: " + JSON.stringify(fieldText.slice(0, 300)));
             lines.push("");
 
