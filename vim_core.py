@@ -222,6 +222,13 @@ class VimModeController(QObject):
 
         return self.run_js(js)
 
+    def send_line_result_later(self, result, delay=0):
+        def later():
+            if self.is_web_alive():
+                self.send_line_result(result)
+
+        QTimer.singleShot(delay, later)
+
     def do_python_line_op(self, payload):
         if not self.is_web_alive():
             return
@@ -233,7 +240,7 @@ class VimModeController(QObject):
 
         fallback_field_index = self.current_field_index()
 
-        result, should_reload = self.line_ops.process(
+        result, changed = self.line_ops.process(
             note=note,
             payload=payload,
             fallback_field_index=fallback_field_index,
@@ -242,13 +249,15 @@ class VimModeController(QObject):
         field_index = result.get("fieldIndex", fallback_field_index)
         self.set_current_field_index(field_index)
 
-        # Critical:
+        # Important:
         # Do NOT call editor.loadNote(), loadNoteKeepingFocus(), or reload_field()
-        # for dd / p / P. Reloading rebuilds Anki's editor DOM and causes delayed
-        # focus/selection events to move the cursor to the bottom or wrapper offset 0.
+        # after dd / p / P. Reloading the field rebuilds Anki's editor DOM and
+        # causes delayed selection/focus events to move the caret to the bottom
+        # or to wrapper offset 0. Instead, line_ops returns newText/newHtml and
+        # editor_vim.js patches the visible field in-place.
         #
-        # line_ops already updates note.fields[field_index].
-        # editor_vim.js must patch the visible field in-place using result["newText"].
+        # The note field is already updated by line_ops.process(), so the model
+        # data is correct; JS only needs to keep the visible editor in sync.
         self.send_line_result(result)
 
     def on_js_message(self, handled, message, context):
@@ -302,8 +311,9 @@ class VimModeController(QObject):
         text = event.text()
         modifiers = event.modifiers()
 
-        # Shift+J and Shift+K are handled in editor_vim.js.
-        # Let them pass through here so insert mode can type capital J/K.
+        # IMPORTANT:
+        # Shift+J and Shift+K are handled in editor_vim.js, not here.
+        # If Qt catches them here, insert mode cannot type capital J/K.
         shift_j = self.is_shift_j(key, modifiers)
         shift_k = self.is_shift_k(key, modifiers)
 

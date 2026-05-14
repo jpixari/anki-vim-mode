@@ -125,7 +125,6 @@ class VimLineOps:
         text,
         action,
         changed=False,
-        should_reload=False,
         error=None,
     ):
         lines = self.text_lines_keep_empty(text)
@@ -144,7 +143,6 @@ class VimLineOps:
             "yankText": self.yank_text,
             "yankIsLine": self.yank_is_line,
             "action": action,
-            # JS uses this to patch the visible editor in place.
             "changed": changed,
             "newText": text,
             "newHtml": html_text,
@@ -153,21 +151,21 @@ class VimLineOps:
         if error:
             data["error"] = error
 
-        # Second tuple value means "should vim_core reload the field?"
-        # Keep this False for dd/p/P so Anki does not move the caret to bottom.
-        return data, should_reload
+        return data, changed
 
     def error_result(self, op, field_index, line_index, text, error, action):
-        return self.result(
-            ok=False,
-            op=op,
-            field_index=field_index,
-            line_index=line_index,
-            text=text,
-            action=action,
-            changed=False,
-            should_reload=False,
-            error=error,
+        return (
+            self.result(
+                ok=False,
+                op=op,
+                field_index=field_index,
+                line_index=line_index,
+                text=text,
+                action=action,
+                changed=False,
+                error=error,
+            )[0],
+            False,
         )
 
     def process(self, note, payload, fallback_field_index=0):
@@ -221,7 +219,6 @@ class VimLineOps:
                 text=text,
                 action=f"yy yanked line index={line_index} text={yanked!r}",
                 changed=False,
-                should_reload=False,
             )
 
         if op == "dd":
@@ -251,7 +248,6 @@ class VimLineOps:
                 text=new_text,
                 action=f"dd deleted line index={line_index} text={yanked!r}",
                 changed=True,
-                should_reload=False,
             )
 
         if op == "p" or op == "P":
@@ -301,7 +297,6 @@ class VimLineOps:
                         f"text={line_text!r}"
                     ),
                     changed=True,
-                    should_reload=False,
                 )
 
             caret = payload.get("caretOffset", None)
@@ -335,7 +330,6 @@ class VimLineOps:
                     f"{op} pasted text index={new_line_index} " f"text={insert_text!r}"
                 ),
                 changed=True,
-                should_reload=False,
             )
 
         return self.error_result(
