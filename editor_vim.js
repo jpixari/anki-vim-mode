@@ -2,28 +2,41 @@
 
 (function () {
     window.ankiVim = {
-        version: "debug-28-rect-line-detection",
+        version: "debug-35-stable-vim-line-source",
+
         mode: window.ankiVim?.mode || "normal",
         fieldIndex: window.ankiVim?.fieldIndex || 0,
+        vimLineIndex: window.ankiVim?.vimLineIndex || 0,
         debugVisible: window.ankiVim?.debugVisible || false,
+
         lastKey: "",
         lastAction: "",
         statusEl: null,
 
         pendingOperator: null,
         visualAnchorOffset: null,
+
         yankText: window.ankiVim?.yankText || "",
         yankIsLine: window.ankiVim?.yankIsLine || false,
+
         pythonCaretOffset: window.ankiVim?.pythonCaretOffset || 0,
-        lineIndexHint: window.ankiVim?.lineIndexHint || 0,
+
+        lastPointerLineIndex: window.ankiVim?.lastPointerLineIndex ?? null,
+        lastPointerFieldIndex: window.ankiVim?.lastPointerFieldIndex ?? null,
+        lastPointerTime: window.ankiVim?.lastPointerTime || 0,
+
+        lastInternalLineMoveTime: window.ankiVim?.lastInternalLineMoveTime || 0,
 
         init: function () {
             this.installStyle();
+            this.cleanupOldLineCursor();
             this.makeStatus();
             this.installKeyHandler();
             this.installCursorTrackers();
             this.setMode(this.mode || "normal");
-            console.log("[Anki Vim] initialized debug-28-rect-line-detection");
+            console.log(
+                "[Anki Vim] initialized debug-35-stable-vim-line-source",
+            );
         },
 
         cls: function (el) {
@@ -144,22 +157,6 @@
                     caret-color: auto !important;
                 }
 
-                body[data-anki-vim-mode="normal"] .rich-text-editable,
-                body[data-anki-vim-mode="normal"] [contenteditable="true"],
-                body[data-anki-vim-mode="normal"] [contenteditable="plaintext-only"],
-                body[data-anki-vim-mode="normal"] textarea,
-                body[data-anki-vim-mode="normal"] input {
-                    caret-shape: block;
-                }
-
-                body[data-anki-vim-mode="insert"] .rich-text-editable,
-                body[data-anki-vim-mode="insert"] [contenteditable="true"],
-                body[data-anki-vim-mode="insert"] [contenteditable="plaintext-only"],
-                body[data-anki-vim-mode="insert"] textarea,
-                body[data-anki-vim-mode="insert"] input {
-                    caret-shape: bar;
-                }
-
                 #anki-vim-block-cursor {
                     position: fixed;
                     z-index: 2147483647;
@@ -170,7 +167,27 @@
                     height: 18px;
                     display: none;
                 }
+
+                #anki-vim-line-cursor,
+                #anki-vim-line-highlight {
+                    display: none !important;
+                }
             `;
+        },
+
+        cleanupOldLineCursor: function () {
+            const oldCursor = document.getElementById("anki-vim-line-cursor");
+            const oldHighlight = document.getElementById(
+                "anki-vim-line-highlight",
+            );
+
+            if (oldCursor) {
+                oldCursor.remove();
+            }
+
+            if (oldHighlight) {
+                oldHighlight.remove();
+            }
         },
 
         makeStatus: function () {
@@ -222,11 +239,11 @@
         },
 
         installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV28) {
+            if (window.ankiVimKeyHandlerInstalledV35) {
                 return;
             }
 
-            window.ankiVimKeyHandlerInstalledV28 = true;
+            window.ankiVimKeyHandlerInstalledV35 = true;
 
             document.addEventListener(
                 "keydown",
@@ -239,8 +256,11 @@
             document.addEventListener(
                 "keyup",
                 function (event) {
+                    if (!window.ankiVim) {
+                        return true;
+                    }
+
                     if (
-                        window.ankiVim &&
                         window.ankiVim.mode === "visual" &&
                         (event.key === "Escape" || event.code === "Escape")
                     ) {
@@ -253,6 +273,12 @@
                         return false;
                     }
 
+                    if (window.ankiVim.mode === "insert") {
+                        window.ankiVim.scheduleSafeLineSync(
+                            "insert keyup " + event.key,
+                        );
+                    }
+
                     return true;
                 },
                 true,
@@ -260,11 +286,60 @@
         },
 
         installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV28) {
+            if (window.ankiVimCursorTrackersInstalledV35) {
                 return;
             }
 
-            window.ankiVimCursorTrackersInstalledV28 = true;
+            window.ankiVimCursorTrackersInstalledV35 = true;
+
+            document.addEventListener(
+                "mousedown",
+                function (event) {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldFromPointerEvent(event);
+                    window.ankiVim.updatePointerLineAndApply(event);
+                    window.ankiVim.updateDebugIfVisible();
+                },
+                true,
+            );
+
+            document.addEventListener(
+                "mouseup",
+                function (event) {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldFromPointerEvent(event);
+                    window.ankiVim.updatePointerLineAndApply(event);
+                    window.ankiVim.scheduleSafeLineSync("mouseup");
+
+                    if (window.ankiVim.mode === "normal") {
+                        window.ankiVim.drawBlockCursorSoon();
+                    }
+
+                    window.ankiVim.updateDebugIfVisible();
+                },
+                true,
+            );
+
+            document.addEventListener(
+                "click",
+                function (event) {
+                    if (!window.ankiVim) {
+                        return;
+                    }
+
+                    window.ankiVim.updateFieldFromPointerEvent(event);
+                    window.ankiVim.updatePointerLineAndApply(event);
+                    window.ankiVim.scheduleSafeLineSync("click");
+                    window.ankiVim.updateDebugIfVisible();
+                },
+                true,
+            );
 
             document.addEventListener(
                 "selectionchange",
@@ -274,7 +349,13 @@
                     }
 
                     window.ankiVim.updateFieldIndexFromSelection();
-                    window.ankiVim.syncLineIndexFromCaret();
+
+                    /*
+                      Do not trust selectionchange immediately. Anki often
+                      reports the editor wrapper at offset 0, which would reset
+                      dd/yy/p to the first line.
+                    */
+                    window.ankiVim.scheduleSafeLineSync("selectionchange");
 
                     if (window.ankiVim.mode === "normal") {
                         window.ankiVim.drawBlockCursorSoon();
@@ -293,33 +374,36 @@
                     }
 
                     window.ankiVim.updateFieldIndexFromActiveElement();
-                    window.ankiVim.syncLineIndexFromCaret();
+                    window.ankiVim.scheduleSafeLineSync("focusin");
                     window.ankiVim.updateDebugIfVisible();
                 },
                 true,
             );
 
             document.addEventListener(
-                "mouseup",
+                "input",
                 function () {
                     if (!window.ankiVim) {
                         return;
                     }
 
-                    window.ankiVim.updateFieldIndexFromSelection();
-                    window.ankiVim.syncLineIndexFromCaret();
-
-                    if (window.ankiVim.mode === "normal") {
-                        window.ankiVim.drawBlockCursorSoon();
-                    }
-
-                    window.ankiVim.updateDebugIfVisible();
+                    window.ankiVim.scheduleSafeLineSync("input");
                 },
                 true,
             );
 
             window.addEventListener(
                 "scroll",
+                function () {
+                    if (window.ankiVim && window.ankiVim.mode === "normal") {
+                        window.ankiVim.drawBlockCursorSoon();
+                    }
+                },
+                true,
+            );
+
+            window.addEventListener(
+                "resize",
                 function () {
                     if (window.ankiVim && window.ankiVim.mode === "normal") {
                         window.ankiVim.drawBlockCursorSoon();
@@ -368,16 +452,42 @@
             }
 
             if (this.mode === "insert") {
+                if (event.key === "Enter") {
+                    /*
+                      Important:
+                      Anki can delay or fake the DOM caret after Enter.
+                      Track the new line immediately, then let the real editor
+                      insert the newline normally.
+                    */
+                    this.moveTrackedLine(1, "insert enter");
+                    this.scheduleSafeLineSync("insert enter");
+                    this.lastAction = "insert passthrough enter";
+                    this.updateDebugIfVisible();
+                    return true;
+                }
+
+                if (event.key === "Backspace") {
+                    this.scheduleSafeLineSync("insert backspace");
+                    this.lastAction = "insert passthrough backspace";
+                    this.updateDebugIfVisible();
+                    return true;
+                }
+
                 if (event.key === "Escape") {
                     event.preventDefault();
                     event.stopPropagation();
                     this.lastAction = "insert -> normal";
-                    this.syncLineIndexFromCaret();
+                    this.safeSyncLine("escape insert", {
+                        allowPointer: true,
+                        allowDom: true,
+                        allowFakeZero: false,
+                    });
                     this.setMode("normal");
                     return false;
                 }
 
                 this.lastAction = "insert passthrough";
+                this.scheduleSafeLineSync("insert keydown " + event.key);
                 this.updateDebugIfVisible();
                 return true;
             }
@@ -393,15 +503,21 @@
                 } else if (event.key === "h") {
                     this.lastAction = "visual move left";
                     this.extendVisualSelection("backward", "character");
+                    this.scheduleSafeLineSync("visual h");
                 } else if (event.key === "l") {
                     this.lastAction = "visual move right";
                     this.extendVisualSelection("forward", "character");
+                    this.scheduleSafeLineSync("visual l");
                 } else if (event.key === "j") {
                     this.lastAction = "visual move down";
                     this.extendVisualSelection("forward", "line");
+                    this.moveTrackedLine(1, "visual j");
+                    this.scheduleSafeLineSync("visual j");
                 } else if (event.key === "k") {
                     this.lastAction = "visual move up";
                     this.extendVisualSelection("backward", "line");
+                    this.moveTrackedLine(-1, "visual k");
+                    this.scheduleSafeLineSync("visual k");
                 } else if (event.key === "y") {
                     this.yankSelection();
                     this.exitVisualMode(false);
@@ -420,7 +536,7 @@
             if (isShiftJ) {
                 event.preventDefault();
                 event.stopPropagation();
-                this.lastAction = "shift+j native next field";
+                this.lastAction = "shift+j next field";
                 this.nextField();
                 return false;
             }
@@ -428,7 +544,7 @@
             if (isShiftK) {
                 event.preventDefault();
                 event.stopPropagation();
-                this.lastAction = "shift+k native previous field";
+                this.lastAction = "shift+k previous field";
                 this.previousField();
                 return false;
             }
@@ -448,6 +564,7 @@
                 "y",
                 "v",
                 "p",
+                "P",
             ];
 
             if (!handled.includes(event.key)) {
@@ -463,6 +580,12 @@
                 const op = this.pendingOperator;
                 this.pendingOperator = null;
                 this.updateStatus();
+
+                this.safeSyncLine("before operator " + op, {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
 
                 if (op === "d" && event.key === "d") {
                     this.deleteCurrentLine();
@@ -481,13 +604,24 @@
             if (event.key === "Escape") {
                 this.pendingOperator = null;
                 this.lastAction = "normal";
+                this.safeSyncLine("escape normal", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.setMode("normal");
             } else if (event.key === "i") {
                 this.lastAction = "normal -> insert";
+                this.safeSyncLine("enter insert", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.setMode("insert");
             } else if (event.key === "a") {
                 this.lastAction = "append";
                 this.moveSelection("forward", "character");
+                this.scheduleSafeLineSync("append");
                 this.setMode("insert");
             } else if (event.key === "o") {
                 this.lastAction = "open line below";
@@ -495,33 +629,63 @@
             } else if (event.key === "h") {
                 this.lastAction = "move left";
                 this.moveSelection("backward", "character");
+                this.scheduleSafeLineSync("h");
             } else if (event.key === "l") {
                 this.lastAction = "move right";
                 this.moveSelection("forward", "character");
+                this.scheduleSafeLineSync("l");
             } else if (event.key === "j") {
                 this.lastAction = "move down";
                 this.moveSelection("forward", "line");
+                this.moveTrackedLine(1, "normal j");
+                this.scheduleSafeLineSync("j");
             } else if (event.key === "k") {
                 this.lastAction = "move up";
                 this.moveSelection("backward", "line");
+                this.moveTrackedLine(-1, "normal k");
+                this.scheduleSafeLineSync("k");
             } else if (event.key === "0") {
                 this.lastAction = "line start";
                 this.moveSelection("backward", "lineboundary");
+                this.scheduleSafeLineSync("0");
             } else if (event.key === "$") {
                 this.lastAction = "line end";
                 this.moveSelection("forward", "lineboundary");
+                this.scheduleSafeLineSync("$");
             } else if (event.key === "d") {
+                this.safeSyncLine("operator d", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.pendingOperator = "d";
                 this.lastAction = "waiting for delete motion";
                 this.updateStatus();
             } else if (event.key === "y") {
+                this.safeSyncLine("operator y", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.pendingOperator = "y";
                 this.lastAction = "waiting for yank motion";
                 this.updateStatus();
             } else if (event.key === "v") {
                 this.enterVisualMode();
             } else if (event.key === "p") {
-                this.pasteYankText();
+                this.safeSyncLine("paste p", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+                this.pasteYankText("p");
+            } else if (event.key === "P") {
+                this.safeSyncLine("paste P", {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+                this.pasteYankText("P");
             }
 
             this.refreshFieldOutline();
@@ -635,8 +799,8 @@
                 0,
                 Math.min(Number(safeIndex) || 0, fields.length - 1),
             );
-            this.fieldIndex = safeIndex;
 
+            this.fieldIndex = safeIndex;
             return fields[safeIndex];
         },
 
@@ -658,7 +822,13 @@
                     control === active ||
                     (container && container.contains(active))
                 ) {
+                    const oldIndex = this.fieldIndex;
                     this.fieldIndex = i;
+
+                    if (oldIndex !== i) {
+                        this.vimLineIndex = 0;
+                    }
+
                     this.syncPythonCurrentField(i);
                     return true;
                 }
@@ -690,7 +860,13 @@
                         fields[i].contains(node) ||
                         (container && container.contains(node))
                     ) {
+                        const oldIndex = this.fieldIndex;
                         this.fieldIndex = i;
+
+                        if (oldIndex !== i) {
+                            this.vimLineIndex = 0;
+                        }
+
                         this.syncPythonCurrentField(i);
                         return true;
                     }
@@ -700,37 +876,6 @@
             }
 
             return false;
-        },
-
-        syncLineIndexFromCaret: function () {
-            const field =
-                this.currentField() || this.fieldByIndex(this.fieldIndex);
-
-            if (!field) {
-                return;
-            }
-
-            const text = this.getFieldPlainText(field);
-            const visualLine = this.getCaretLineIndexByRect(field);
-
-            if (visualLine !== null && visualLine !== undefined) {
-                this.lineIndexHint = Math.max(
-                    0,
-                    Math.min(visualLine, text.split("\n").length - 1),
-                );
-
-                this.pythonCaretOffset = this.offsetForLineIndex(
-                    text,
-                    this.lineIndexHint,
-                );
-
-                return;
-            }
-
-            const caret = this.getCaretOffsetInField(field);
-
-            this.lineIndexHint = this.lineIndexFromOffset(text, caret);
-            this.pythonCaretOffset = caret;
         },
 
         fieldContainer: function (field) {
@@ -751,6 +896,99 @@
             }
 
             return field ? field.parentElement || field : null;
+        },
+
+        updateFieldFromPointerEvent: function (event) {
+            const fields = this.fields();
+
+            let index = -1;
+
+            for (let i = 0; i < fields.length; i++) {
+                const field = fields[i];
+                const container = this.fieldContainer(field);
+                const rect = (container || field).getBoundingClientRect();
+
+                const inside =
+                    event.clientY >= rect.top &&
+                    event.clientY <= rect.bottom &&
+                    event.clientX >= rect.left &&
+                    event.clientX <= rect.right;
+
+                if (inside) {
+                    index = i;
+                    break;
+                }
+            }
+
+            if (index < 0) {
+                return false;
+            }
+
+            const oldIndex = this.fieldIndex;
+            this.fieldIndex = index;
+
+            if (oldIndex !== index) {
+                this.vimLineIndex = 0;
+            }
+
+            this.syncPythonCurrentField(index);
+            this.refreshFieldOutline();
+            this.drawBlockCursorSoon();
+
+            return true;
+        },
+
+        updatePointerLineAndApply: function (event) {
+            const field = this.fieldByIndex(this.fieldIndex);
+
+            if (!field) {
+                return false;
+            }
+
+            const rect = field.getBoundingClientRect();
+
+            if (!rect || rect.height <= 0) {
+                return false;
+            }
+
+            const style = window.getComputedStyle(field);
+            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
+            const lineHeight = this.lineHeightPx(field);
+
+            let lineIndex = Math.floor(
+                (event.clientY - rect.top - paddingTop) / lineHeight,
+            );
+
+            lineIndex = Math.max(0, lineIndex);
+
+            this.lastPointerLineIndex = lineIndex;
+            this.lastPointerFieldIndex = this.fieldIndex;
+            this.lastPointerTime = Date.now();
+
+            /*
+              Mouse click is a deliberate line choice. Apply it immediately.
+              Later fake selectionchange events are not allowed to reset it.
+            */
+            this.vimLineIndex = lineIndex;
+            this.normalizeVimLineIndex();
+
+            this.lastAction =
+                "pointer line field=" +
+                this.fieldIndex +
+                " line=" +
+                this.vimLineIndex;
+
+            return true;
+        },
+
+        syncPythonCurrentField: function (index) {
+            try {
+                if (typeof pycmd === "function") {
+                    pycmd("focus:" + index);
+                }
+            } catch (error) {
+                console.log("[Anki Vim] pycmd focus failed", error);
+            }
         },
 
         isVisibleControl: function (el, fieldRect) {
@@ -879,6 +1117,334 @@
             return String(text).replace(/\n$/, "");
         },
 
+        getFieldPlainText: function (field) {
+            const control = this.editorControl(field);
+
+            if (control) {
+                return control.value || "";
+            }
+
+            return this.nodePlainText(field);
+        },
+
+        isBlockElement: function (node) {
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                return false;
+            }
+
+            const tag = node.tagName.toLowerCase();
+
+            return [
+                "div",
+                "p",
+                "li",
+                "section",
+                "article",
+                "header",
+                "footer",
+                "blockquote",
+                "pre",
+            ].includes(tag);
+        },
+
+        fragmentToPlainText: function (root) {
+            let out = "";
+
+            const walk = (node) => {
+                if (!node) {
+                    return;
+                }
+
+                if (node.nodeType === Node.TEXT_NODE) {
+                    out += node.nodeValue || "";
+                    return;
+                }
+
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    for (const child of Array.from(node.childNodes || [])) {
+                        walk(child);
+                    }
+
+                    return;
+                }
+
+                const tag = node.tagName.toLowerCase();
+
+                if (tag === "br") {
+                    out += "\n";
+                    return;
+                }
+
+                const isBlock = this.isBlockElement(node);
+                const before = out.length;
+
+                for (const child of Array.from(node.childNodes || [])) {
+                    walk(child);
+                }
+
+                if (isBlock && out.length === before) {
+                    out += "\n";
+                    return;
+                }
+
+                if (isBlock && out.length > 0 && !out.endsWith("\n")) {
+                    out += "\n";
+                }
+            };
+
+            for (const child of Array.from(root.childNodes || [])) {
+                walk(child);
+            }
+
+            return out;
+        },
+
+        isProbablyFakeRootZeroSelection: function (field, range, beforeText) {
+            if (!field || !range) {
+                return false;
+            }
+
+            const start = range.startContainer;
+            const offset = range.startOffset || 0;
+
+            const text = this.getFieldPlainText(field);
+            const fieldHasMultipleLines = String(text || "").includes("\n");
+
+            if (!fieldHasMultipleLines) {
+                return false;
+            }
+
+            if (offset !== 0) {
+                return false;
+            }
+
+            if (beforeText && beforeText.length > 0) {
+                return false;
+            }
+
+            if (start === field) {
+                return true;
+            }
+
+            if (start && start.nodeType === Node.ELEMENT_NODE) {
+                const el = start;
+                const cls = this.cls(el).toLowerCase();
+
+                if (
+                    el === field ||
+                    cls.includes("rich-text") ||
+                    cls.includes("relative") ||
+                    cls.includes("editable") ||
+                    field.contains(el)
+                ) {
+                    return true;
+                }
+            }
+
+            return false;
+        },
+
+        getCaretLineIndexFromDomSelection: function (field) {
+            const sel = window.getSelection();
+
+            if (!field || !sel || sel.rangeCount === 0) {
+                return null;
+            }
+
+            const range = sel.getRangeAt(0);
+
+            if (
+                !field.contains(range.startContainer) &&
+                field !== range.startContainer
+            ) {
+                return null;
+            }
+
+            try {
+                const pre = document.createRange();
+                pre.selectNodeContents(field);
+                pre.setEnd(range.startContainer, range.startOffset);
+
+                const fragment = pre.cloneContents();
+                const beforeText = this.fragmentToPlainText(fragment);
+
+                if (
+                    this.isProbablyFakeRootZeroSelection(
+                        field,
+                        range,
+                        beforeText,
+                    )
+                ) {
+                    return null;
+                }
+
+                let lineIndex = beforeText.split("\n").length - 1;
+                lineIndex = Math.max(0, lineIndex);
+
+                return lineIndex;
+            } catch (error) {
+                return null;
+            }
+        },
+
+        scheduleSafeLineSync: function (reason) {
+            setTimeout(() => {
+                this.safeSyncLine(reason + " t0", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+            }, 0);
+
+            setTimeout(() => {
+                this.safeSyncLine(reason + " t50", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+            }, 50);
+
+            setTimeout(() => {
+                this.safeSyncLine(reason + " t160", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+            }, 160);
+        },
+
+        safeSyncLine: function (reason, options) {
+            const opts = options || {};
+            const allowPointer = opts.allowPointer !== false;
+            const allowDom = opts.allowDom !== false;
+
+            const field =
+                this.currentField() || this.fieldByIndex(this.fieldIndex);
+
+            if (!field) {
+                return false;
+            }
+
+            const control = this.editorControl(field);
+
+            if (control && typeof control.value === "string") {
+                const text = control.value || "";
+                const caret = control.selectionStart || 0;
+
+                this.vimLineIndex = this.lineIndexFromOffset(text, caret);
+                this.normalizeVimLineIndex();
+
+                this.lastAction =
+                    "synced line from control reason=" +
+                    reason +
+                    " line=" +
+                    this.vimLineIndex;
+
+                return true;
+            }
+
+            /*
+              Use recent pointer only if it happened after the latest j/k
+              internal move. This prevents old mouse clicks from overriding
+              j/k navigation.
+            */
+            if (
+                allowPointer &&
+                this.lastPointerFieldIndex === this.fieldIndex &&
+                this.lastPointerLineIndex !== null &&
+                this.lastPointerTime >= this.lastInternalLineMoveTime &&
+                Date.now() - this.lastPointerTime < 1600
+            ) {
+                this.vimLineIndex = this.lastPointerLineIndex;
+                this.normalizeVimLineIndex();
+
+                this.lastAction =
+                    "synced line from pointer reason=" +
+                    reason +
+                    " line=" +
+                    this.vimLineIndex;
+
+                return true;
+            }
+
+            if (allowDom) {
+                const domLine = this.getCaretLineIndexFromDomSelection(field);
+
+                if (domLine !== null && domLine !== undefined) {
+                    /*
+                      Critical guard:
+                      If DOM says 0 right after j/k moved us away from 0, treat
+                      it as Anki's fake wrapper selection unless the internal
+                      line is also 0.
+                    */
+                    if (
+                        domLine === 0 &&
+                        this.vimLineIndex > 0 &&
+                        Date.now() - this.lastInternalLineMoveTime < 1200
+                    ) {
+                        this.normalizeVimLineIndex();
+                        this.lastAction =
+                            "ignored fake DOM zero reason=" +
+                            reason +
+                            " kept line=" +
+                            this.vimLineIndex;
+                        return false;
+                    }
+
+                    this.vimLineIndex = domLine;
+                    this.normalizeVimLineIndex();
+
+                    this.lastAction =
+                        "synced line from DOM reason=" +
+                        reason +
+                        " line=" +
+                        this.vimLineIndex;
+
+                    return true;
+                }
+            }
+
+            this.normalizeVimLineIndex();
+            return false;
+        },
+
+        normalizeVimLineIndex: function () {
+            const parsed = Number(this.vimLineIndex);
+
+            if (!Number.isFinite(parsed)) {
+                this.vimLineIndex = 0;
+            } else {
+                this.vimLineIndex = Math.floor(parsed);
+            }
+
+            if (this.vimLineIndex < 0) {
+                this.vimLineIndex = 0;
+            }
+
+            return this.vimLineIndex;
+        },
+
+        lineIndexFromOffset: function (text, offset) {
+            const safeOffset = Math.max(0, Math.min(offset || 0, text.length));
+            return text.slice(0, safeOffset).split("\n").length - 1;
+        },
+
+        getCurrentFieldLineCountDebugOnly: function () {
+            const field = this.fieldByIndex(this.fieldIndex);
+
+            if (!field) {
+                return 1;
+            }
+
+            const text = this.getFieldPlainText(field);
+
+            if (text === "") {
+                return 1;
+            }
+
+            return Math.max(1, text.split("\n").length);
+        },
+
         currentField: function () {
             const fields = this.fields();
 
@@ -902,14 +1468,18 @@
             return fields[this.fieldIndex];
         },
 
-        syncPythonCurrentField: function (index) {
-            try {
-                if (typeof pycmd === "function") {
-                    pycmd("focus:" + index);
-                }
-            } catch (error) {
-                console.log("[Anki Vim] pycmd focus failed", error);
-            }
+        moveTrackedLine: function (delta, reason) {
+            this.vimLineIndex = (Number(this.vimLineIndex) || 0) + delta;
+            this.normalizeVimLineIndex();
+            this.lastInternalLineMoveTime = Date.now();
+
+            this.lastAction =
+                "tracked vimLineIndex=" +
+                this.vimLineIndex +
+                " reason=" +
+                reason +
+                " jsLineCountDebugOnly=" +
+                this.getCurrentFieldLineCountDebugOnly();
         },
 
         sendPythonLineOp: function (op) {
@@ -917,39 +1487,23 @@
                 this.currentField() || this.fieldByIndex(this.fieldIndex);
 
             let caretOffset = 0;
-            let text = "";
 
             if (field) {
-                text = this.getFieldPlainText(field);
-
-                const visualLine = this.getCaretLineIndexByRect(field);
-
-                if (visualLine !== null && visualLine !== undefined) {
-                    this.lineIndexHint = Math.max(
-                        0,
-                        Math.min(visualLine, text.split("\n").length - 1),
-                    );
-
-                    caretOffset = this.offsetForLineIndex(
-                        text,
-                        this.lineIndexHint,
-                    );
-                    this.pythonCaretOffset = caretOffset;
-                } else {
-                    caretOffset = this.getCaretOffsetInField(field);
-                    this.lineIndexHint = this.lineIndexFromOffset(
-                        text,
-                        caretOffset,
-                    );
-                    this.pythonCaretOffset = caretOffset;
-                }
+                this.safeSyncLine("send op " + op, {
+                    allowPointer: true,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
+                caretOffset = this.getCaretOffsetInField(field);
             }
+
+            this.normalizeVimLineIndex();
 
             const payload = {
                 op: op,
                 fieldIndex: this.fieldIndex,
                 caretOffset: caretOffset,
-                lineIndexHint: this.lineIndexHint || 0,
+                vimLineIndex: this.vimLineIndex,
                 yankText: this.yankText || "",
                 yankIsLine: !!this.yankIsLine,
             };
@@ -960,10 +1514,10 @@
                     this.lastAction =
                         "sent python op " +
                         op +
-                        " lineIndexHint=" +
-                        payload.lineIndexHint +
-                        " caretOffset=" +
-                        payload.caretOffset;
+                        " fieldIndex=" +
+                        payload.fieldIndex +
+                        " vimLineIndex=" +
+                        payload.vimLineIndex;
                 } else {
                     this.lastAction = "python op failed: no pycmd";
                 }
@@ -997,9 +1551,15 @@
                 this.pythonCaretOffset = result.caretOffset;
             }
 
-            if (result.lineIndexHint !== undefined) {
-                this.lineIndexHint = result.lineIndexHint;
+            if (result.vimLineIndex !== undefined) {
+                this.vimLineIndex = result.vimLineIndex;
+            } else if (result.currentLineIndex !== undefined) {
+                this.vimLineIndex = result.currentLineIndex;
+            } else if (result.lineIndexHint !== undefined) {
+                this.vimLineIndex = result.lineIndexHint;
             }
+
+            this.normalizeVimLineIndex();
 
             this.pendingOperator = null;
             this.mode = "normal";
@@ -1034,7 +1594,7 @@
                     this.focusFieldElement(field, false);
                 }
 
-                this.syncLineIndexFromCaret();
+                this.normalizeVimLineIndex();
                 this.refreshFieldOutline();
                 this.drawBlockCursor();
                 this.updateDebugIfVisible();
@@ -1064,8 +1624,10 @@
             }
 
             this.fieldIndex = index;
-            this.lineIndexHint = end ? 999999 : 0;
             this.syncPythonCurrentField(index);
+
+            this.vimLineIndex = end ? 999999 : 0;
+            this.normalizeVimLineIndex();
 
             try {
                 if (
@@ -1095,7 +1657,9 @@
                 "native focused field index " +
                 index +
                 " total=" +
-                fields.length;
+                fields.length +
+                " vimLineIndex=" +
+                this.vimLineIndex;
 
             this.forceRefocusAndCursor(field);
         },
@@ -1124,11 +1688,11 @@
                     control.setSelectionRange(pos, pos);
                 } catch (error) {}
 
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    pos,
-                );
-
+                this.safeSyncLine("focus control", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 return;
             }
 
@@ -1139,10 +1703,6 @@
                     field.focus();
                 } catch (innerError) {}
             }
-
-            const text = this.getFieldPlainText(field);
-            const offset = end ? text.length : 0;
-            this.setCaretOffsetInField(field, offset);
         },
 
         ensureField: function () {
@@ -1210,10 +1770,11 @@
 
             if (control) {
                 this.moveControlSelection(control, direction, granularity);
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    control.selectionStart || 0,
-                );
+                this.safeSyncLine("move control", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.drawBlockCursorSoon();
                 return;
             }
@@ -1232,7 +1793,6 @@
                 this.lastAction = "move failed: " + error;
             }
 
-            this.syncLineIndexFromCaret();
             this.drawBlockCursorSoon();
         },
 
@@ -1321,16 +1881,6 @@
             }
         },
 
-        getFieldPlainText: function (field) {
-            const control = this.editorControl(field);
-
-            if (control) {
-                return control.value || "";
-            }
-
-            return this.nodePlainText(field);
-        },
-
         getCaretOffsetInField: function (field) {
             const control = this.editorControl(field);
 
@@ -1356,12 +1906,25 @@
                 return this.pythonCaretOffset || 0;
             }
 
-            const pre = document.createRange();
-
             try {
+                const pre = document.createRange();
                 pre.selectNodeContents(field);
                 pre.setEnd(range.startContainer, range.startOffset);
-                return pre.toString().length;
+
+                const fragment = pre.cloneContents();
+                const beforeText = this.fragmentToPlainText(fragment);
+
+                if (
+                    this.isProbablyFakeRootZeroSelection(
+                        field,
+                        range,
+                        beforeText,
+                    )
+                ) {
+                    return this.pythonCaretOffset || 0;
+                }
+
+                return beforeText.length;
             } catch (error) {
                 return this.pythonCaretOffset || 0;
             }
@@ -1387,19 +1950,13 @@
                     control.setSelectionRange(pos, pos);
                 } catch (error) {}
 
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    pos,
-                );
-
+                this.safeSyncLine("set caret control", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 return true;
             }
-
-            const text = this.getFieldPlainText(field);
-            const wantedOffset = Math.max(
-                0,
-                Math.min(offset || 0, text.length),
-            );
 
             try {
                 field.focus({ preventScroll: true });
@@ -1409,76 +1966,7 @@
                 } catch (innerError) {}
             }
 
-            const range = document.createRange();
-            const sel = window.getSelection();
-
-            if (!sel) {
-                return false;
-            }
-
-            let remaining = wantedOffset;
-            let foundNode = null;
-            let foundOffset = 0;
-
-            const walker = document.createTreeWalker(
-                field,
-                NodeFilter.SHOW_TEXT,
-                {
-                    acceptNode: function (node) {
-                        if (!node.nodeValue || node.nodeValue.length === 0) {
-                            return NodeFilter.FILTER_REJECT;
-                        }
-
-                        return NodeFilter.FILTER_ACCEPT;
-                    },
-                },
-            );
-
-            let node = walker.nextNode();
-
-            while (node) {
-                const length = node.nodeValue.length;
-
-                if (remaining <= length) {
-                    foundNode = node;
-                    foundOffset = remaining;
-                    break;
-                }
-
-                remaining -= length;
-                node = walker.nextNode();
-            }
-
-            try {
-                if (foundNode) {
-                    range.setStart(foundNode, foundOffset);
-                    range.collapse(true);
-                } else {
-                    range.selectNodeContents(field);
-                    range.collapse(false);
-                }
-
-                sel.removeAllRanges();
-                sel.addRange(range);
-
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    text,
-                    wantedOffset,
-                );
-                this.pythonCaretOffset = wantedOffset;
-
-                return true;
-            } catch (error) {
-                try {
-                    range.selectNodeContents(field);
-                    range.collapse(false);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    return true;
-                } catch (innerError) {
-                    return false;
-                }
-            }
+            return true;
         },
 
         getLineBounds: function (text, offset, includeNewline) {
@@ -1506,27 +1994,6 @@
             };
         },
 
-        lineIndexFromOffset: function (text, offset) {
-            const safeOffset = Math.max(0, Math.min(offset || 0, text.length));
-            return text.slice(0, safeOffset).split("\n").length - 1;
-        },
-
-        offsetForLineIndex: function (text, lineIndex) {
-            const lines = String(text || "").split("\n");
-            const safeLine = Math.max(
-                0,
-                Math.min(lineIndex || 0, lines.length - 1),
-            );
-
-            let offset = 0;
-
-            for (let i = 0; i < safeLine; i++) {
-                offset += lines[i].length + 1;
-            }
-
-            return offset;
-        },
-
         lineHeightPx: function (field) {
             try {
                 const style = window.getComputedStyle(field);
@@ -1544,83 +2011,6 @@
             } catch (error) {}
 
             return 20;
-        },
-
-        caretRectFromSelection: function (field) {
-            const sel = window.getSelection();
-
-            if (!field || !sel || sel.rangeCount === 0) {
-                return null;
-            }
-
-            const range = sel.getRangeAt(0).cloneRange();
-
-            if (
-                !field.contains(range.startContainer) &&
-                field !== range.startContainer
-            ) {
-                return null;
-            }
-
-            try {
-                range.collapse(true);
-
-                let rect = range.getBoundingClientRect();
-
-                if (rect && rect.top && rect.left) {
-                    return rect;
-                }
-
-                const marker = document.createElement("span");
-                marker.textContent = "\u200b";
-
-                range.insertNode(marker);
-                rect = marker.getBoundingClientRect();
-
-                marker.remove();
-
-                if (rect && rect.top && rect.left) {
-                    return rect;
-                }
-            } catch (error) {}
-
-            return null;
-        },
-
-        getCaretLineIndexByRect: function (field) {
-            if (!field) {
-                return null;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const text = control.value || "";
-                const caret = control.selectionStart || 0;
-                return this.lineIndexFromOffset(text, caret);
-            }
-
-            const rect = this.caretRectFromSelection(field);
-
-            if (!rect) {
-                return null;
-            }
-
-            const fieldRect = field.getBoundingClientRect();
-            const style = window.getComputedStyle(field);
-
-            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
-            const lineHeight = this.lineHeightPx(field);
-
-            const text = this.getFieldPlainText(field);
-            const lineCount = Math.max(1, text.split("\n").length);
-
-            const relativeTop = rect.top - fieldRect.top - paddingTop;
-            let lineIndex = Math.round(relativeTop / lineHeight);
-
-            lineIndex = Math.max(0, Math.min(lineIndex, lineCount - 1));
-
-            return lineIndex;
         },
 
         replaceFieldPlainText: function (
@@ -1654,11 +2044,11 @@
                     control.setSelectionRange(safeCaret, safeCaret);
                 } catch (error) {}
 
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    safeCaret,
-                );
-
+                this.safeSyncLine("replace text", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.forceRefocusAndCursor(field);
                 return true;
             }
@@ -1682,6 +2072,12 @@
                 return;
             }
 
+            this.safeSyncLine("enter visual", {
+                allowPointer: true,
+                allowDom: true,
+                allowFakeZero: false,
+            });
+
             const control = this.editorControl(field);
 
             if (control) {
@@ -1689,10 +2085,7 @@
                 const end = Math.min(caret + 1, control.value.length);
 
                 this.visualAnchorOffset = caret;
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    caret,
-                );
+
                 this.mode = "visual";
                 document.body.dataset.ankiVimMode = "visual";
                 this.pendingOperator = null;
@@ -1707,9 +2100,6 @@
                 this.updateDebugIfVisible();
                 return;
             }
-
-            const caret = this.getCaretOffsetInField(field);
-            this.visualAnchorOffset = caret;
 
             const sel = window.getSelection();
 
@@ -1751,11 +2141,11 @@
                 } catch (error) {}
 
                 finalOffset = pos;
-
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    pos,
-                );
+                this.safeSyncLine("exit visual control", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
             } else if (field) {
                 const sel = window.getSelection();
 
@@ -1764,7 +2154,11 @@
                     range.collapse(!!collapseToStart);
                     sel.removeAllRanges();
                     sel.addRange(range);
-                    finalOffset = this.getCaretOffsetInField(field);
+                    this.safeSyncLine("exit visual dom", {
+                        allowPointer: false,
+                        allowDom: true,
+                        allowFakeZero: false,
+                    });
                 }
             }
 
@@ -1827,7 +2221,11 @@
                     );
                 } catch (error) {}
 
-                this.lineIndexHint = this.lineIndexFromOffset(text, focus);
+                this.safeSyncLine("extend visual control", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 return;
             }
 
@@ -1839,12 +2237,15 @@
 
             try {
                 sel.modify("extend", direction, granularity);
+                this.safeSyncLine("extend visual dom", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
             } catch (error) {
                 console.log("[Anki Vim] visual extend failed", error);
                 this.lastAction = "visual extend failed: " + error;
             }
-
-            this.syncLineIndexFromCaret();
         },
 
         getSelectionText: function () {
@@ -1908,11 +2309,6 @@
                     "deleteContentForward",
                 );
 
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    control.value || "",
-                    start,
-                );
-
                 this.pythonCaretOffset = start;
                 this.lastAction =
                     "deleted selection: " + JSON.stringify(selected);
@@ -1934,6 +2330,11 @@
                 this.pythonCaretOffset = field
                     ? this.getCaretOffsetInField(field)
                     : this.pythonCaretOffset;
+                this.safeSyncLine("delete visual dom", {
+                    allowPointer: false,
+                    allowDom: true,
+                    allowFakeZero: false,
+                });
                 this.lastAction =
                     "deleted selection: " + JSON.stringify(this.yankText);
             } catch (error) {
@@ -1941,8 +2342,8 @@
             }
         },
 
-        pasteYankText: function () {
-            this.sendPythonLineOp("p");
+        pasteYankText: function (op) {
+            this.sendPythonLineOp(op || "p");
         },
 
         openLineBelow: function () {
@@ -1970,11 +2371,7 @@
                     "insertLineBreak",
                 );
 
-                this.lineIndexHint = this.lineIndexFromOffset(
-                    newText,
-                    insertAt + 1,
-                );
-
+                this.moveTrackedLine(1, "open line below control");
                 this.lastAction = "opened line below";
                 this.setMode("insert");
                 return;
@@ -1985,7 +2382,8 @@
             try {
                 sel.modify("move", "forward", "lineboundary");
                 document.execCommand("insertLineBreak");
-                this.syncLineIndexFromCaret();
+                this.moveTrackedLine(1, "open line below dom");
+                this.scheduleSafeLineSync("open line dom");
                 this.setMode("insert");
                 this.lastAction = "opened line below";
             } catch (error) {
@@ -2010,7 +2408,7 @@
             const resolvedIndex = index + 1 >= fields.length ? 0 : index + 1;
 
             this.lastAction =
-                "next native field from index " +
+                "next field from index " +
                 index +
                 " to " +
                 resolvedIndex +
@@ -2034,7 +2432,7 @@
             const resolvedIndex = index - 1 < 0 ? fields.length - 1 : index - 1;
 
             this.lastAction =
-                "previous native field from index " +
+                "previous field from index " +
                 index +
                 " to " +
                 resolvedIndex +
@@ -2150,15 +2548,41 @@
                 } catch (error) {}
             }
 
-            const rect = this.caretRectFromSelection(field);
+            const sel = window.getSelection();
 
-            if (rect) {
-                return {
-                    left: rect.left,
-                    top: rect.top,
-                    width: Math.max(rect.width || 9, 9),
-                    height: Math.max(rect.height || 18, 18),
-                };
+            if (sel && sel.rangeCount > 0) {
+                try {
+                    const range = sel.getRangeAt(0).cloneRange();
+
+                    if (
+                        field.contains(range.startContainer) ||
+                        field === range.startContainer
+                    ) {
+                        range.collapse(true);
+
+                        let rect = range.getBoundingClientRect();
+
+                        if (
+                            (!rect || rect.width === 0) &&
+                            range.startContainer
+                        ) {
+                            const marker = document.createElement("span");
+                            marker.textContent = "\u200b";
+                            range.insertNode(marker);
+                            rect = marker.getBoundingClientRect();
+                            marker.remove();
+                        }
+
+                        if (rect && rect.top && rect.left) {
+                            return {
+                                left: rect.left,
+                                top: rect.top,
+                                width: Math.max(rect.width || 9, 9),
+                                height: Math.max(rect.height || 18, 18),
+                            };
+                        }
+                    }
+                } catch (error) {}
             }
 
             const r = field.getBoundingClientRect();
@@ -2287,7 +2711,9 @@
             const control = field ? this.editorControl(field) : null;
             const fieldText = field ? this.getFieldPlainText(field) : "";
             const caretOffset = field ? this.getCaretOffsetInField(field) : -1;
-            const rectLine = field ? this.getCaretLineIndexByRect(field) : null;
+            const domLine = field
+                ? this.getCaretLineIndexFromDomSelection(field)
+                : null;
 
             const lines = [];
 
@@ -2303,13 +2729,21 @@
             lines.push("candidate fields: " + candidates.length);
             lines.push("usable fields: " + fields.length);
             lines.push("fieldIndex: " + this.fieldIndex);
+            lines.push("vimLineIndex: " + this.vimLineIndex);
+            lines.push("domLineIndex: " + domLine);
+            lines.push("lastPointerLineIndex: " + this.lastPointerLineIndex);
+            lines.push(
+                "lastInternalLineMoveTime: " + this.lastInternalLineMoveTime,
+            );
+            lines.push(
+                "jsLineCountDebugOnly: " +
+                    this.getCurrentFieldLineCountDebugOnly(),
+            );
             lines.push("pendingOperator: " + this.pendingOperator);
             lines.push("yankText: " + JSON.stringify(this.yankText));
             lines.push("yankIsLine: " + this.yankIsLine);
             lines.push("caretOffset: " + caretOffset);
             lines.push("pythonCaretOffset: " + this.pythonCaretOffset);
-            lines.push("lineIndexHint: " + this.lineIndexHint);
-            lines.push("rectLineIndex: " + rectLine);
             lines.push("fieldText: " + JSON.stringify(fieldText.slice(0, 300)));
             lines.push("");
 
