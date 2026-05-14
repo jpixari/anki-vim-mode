@@ -2,7 +2,7 @@
 
 (function () {
     window.ankiVim = {
-        version: "debug-35-stable-vim-line-source",
+        version: "debug-41-no-rerender-after-line-ops",
 
         mode: window.ankiVim?.mode || "normal",
         fieldIndex: window.ankiVim?.fieldIndex || 0,
@@ -27,15 +27,19 @@
 
         lastInternalLineMoveTime: window.ankiVim?.lastInternalLineMoveTime || 0,
 
+        lineSyncLockUntil: window.ankiVim?.lineSyncLockUntil || 0,
+        lockedVimLineIndex: window.ankiVim?.lockedVimLineIndex ?? null,
+
         init: function () {
             this.installStyle();
             this.cleanupOldLineCursor();
             this.makeStatus();
             this.installKeyHandler();
             this.installCursorTrackers();
+            this.installCursorWatchdog();
             this.setMode(this.mode || "normal");
             console.log(
-                "[Anki Vim] initialized debug-35-stable-vim-line-source",
+                "[Anki Vim] initialized debug-41-no-rerender-after-line-ops",
             );
         },
 
@@ -63,16 +67,12 @@
                     bottom: 0px;
                     transform: translateX(-50%);
                     z-index: 2147483647;
-
                     min-width: 150px;
                     padding: 7px 16px;
-
                     border: 1px solid rgba(255, 255, 255, 0.18);
                     border-radius: 999px;
-
                     background: rgba(28, 28, 32, 0.88);
                     color: #f4f4f5;
-
                     font-family:
                         -apple-system,
                         BlinkMacSystemFont,
@@ -82,14 +82,11 @@
                     font-weight: 600;
                     letter-spacing: 0.08em;
                     text-align: center;
-
                     box-shadow:
                         0 8px 22px rgba(0, 0, 0, 0.22),
                         inset 0 1px 0 rgba(255, 255, 255, 0.12);
-
                     user-select: none;
                     pointer-events: none;
-
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
@@ -114,18 +111,14 @@
                     right: 14px;
                     bottom: 14px;
                     z-index: 2147483647;
-
                     max-width: 900px;
                     max-height: 520px;
                     overflow: auto;
-
                     padding: 10px 12px;
                     border: 1px solid rgba(255, 255, 255, 0.14);
                     border-radius: 12px;
-
                     background: rgba(17, 17, 20, 0.92);
                     color: #eeeeee;
-
                     font-family:
                         ui-monospace,
                         SFMono-Regular,
@@ -137,9 +130,7 @@
                     line-height: 1.45;
                     white-space: pre-wrap;
                     user-select: text;
-
                     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
-
                     backdrop-filter: blur(10px);
                     -webkit-backdrop-filter: blur(10px);
                 }
@@ -239,11 +230,11 @@
         },
 
         installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV35) {
+            if (window.ankiVimKeyHandlerInstalledV41) {
                 return;
             }
 
-            window.ankiVimKeyHandlerInstalledV35 = true;
+            window.ankiVimKeyHandlerInstalledV41 = true;
 
             document.addEventListener(
                 "keydown",
@@ -286,11 +277,11 @@
         },
 
         installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV35) {
+            if (window.ankiVimCursorTrackersInstalledV41) {
                 return;
             }
 
-            window.ankiVimCursorTrackersInstalledV35 = true;
+            window.ankiVimCursorTrackersInstalledV41 = true;
 
             document.addEventListener(
                 "mousedown",
@@ -299,6 +290,7 @@
                         return;
                     }
 
+                    window.ankiVim.unlockLineSync("mousedown");
                     window.ankiVim.updateFieldFromPointerEvent(event);
                     window.ankiVim.updatePointerLineAndApply(event);
                     window.ankiVim.updateDebugIfVisible();
@@ -349,12 +341,6 @@
                     }
 
                     window.ankiVim.updateFieldIndexFromSelection();
-
-                    /*
-                      Do not trust selectionchange immediately. Anki often
-                      reports the editor wrapper at offset 0, which would reset
-                      dd/yy/p to the first line.
-                    */
                     window.ankiVim.scheduleSafeLineSync("selectionchange");
 
                     if (window.ankiVim.mode === "normal") {
@@ -413,6 +399,24 @@
             );
         },
 
+        installCursorWatchdog: function () {
+            if (window.ankiVimCursorWatchdogInstalledV41) {
+                return;
+            }
+
+            window.ankiVimCursorWatchdogInstalledV41 = true;
+
+            setInterval(() => {
+                if (!window.ankiVim) {
+                    return;
+                }
+
+                if (window.ankiVim.mode === "normal") {
+                    window.ankiVim.drawBlockCursor();
+                }
+            }, 120);
+        },
+
         handleKey: function (event) {
             const isShiftJ =
                 event.code === "KeyJ" &&
@@ -453,13 +457,8 @@
 
             if (this.mode === "insert") {
                 if (event.key === "Enter") {
-                    /*
-                      Important:
-                      Anki can delay or fake the DOM caret after Enter.
-                      Track the new line immediately, then let the real editor
-                      insert the newline normally.
-                    */
                     this.moveTrackedLine(1, "insert enter");
+                    this.lockLineSync(this.vimLineIndex, 2200, "insert enter");
                     this.scheduleSafeLineSync("insert enter");
                     this.lastAction = "insert passthrough enter";
                     this.updateDebugIfVisible();
@@ -480,8 +479,8 @@
                     this.safeSyncLine("escape insert", {
                         allowPointer: true,
                         allowDom: true,
-                        allowFakeZero: false,
                     });
+                    this.lockLineSync(this.vimLineIndex, 900, "escape insert");
                     this.setMode("normal");
                     return false;
                 }
@@ -512,18 +511,38 @@
                     this.lastAction = "visual move down";
                     this.extendVisualSelection("forward", "line");
                     this.moveTrackedLine(1, "visual j");
+                    this.lockLineSync(this.vimLineIndex, 900, "visual j");
                     this.scheduleSafeLineSync("visual j");
                 } else if (event.key === "k") {
                     this.lastAction = "visual move up";
                     this.extendVisualSelection("backward", "line");
                     this.moveTrackedLine(-1, "visual k");
+                    this.lockLineSync(this.vimLineIndex, 900, "visual k");
                     this.scheduleSafeLineSync("visual k");
                 } else if (event.key === "y") {
+                    const savedFieldIndex = this.fieldIndex;
+                    const savedLineIndex = this.vimLineIndex;
                     this.yankSelection();
-                    this.exitVisualMode(false);
+                    this.vimLineIndex = savedLineIndex;
+                    this.lockLineSync(savedLineIndex, 6000, "visual yank");
+                    this.exitVisualMode(false, savedFieldIndex, savedLineIndex);
+                    this.forceNormalCursorRestore(
+                        savedFieldIndex,
+                        savedLineIndex,
+                        "visual yank",
+                    );
                 } else if (event.key === "d") {
+                    const savedFieldIndex = this.fieldIndex;
+                    const savedLineIndex = this.vimLineIndex;
                     this.deleteSelection();
-                    this.exitVisualMode(true);
+                    this.vimLineIndex = savedLineIndex;
+                    this.lockLineSync(savedLineIndex, 6000, "visual delete");
+                    this.exitVisualMode(true, savedFieldIndex, savedLineIndex);
+                    this.forceNormalCursorRestore(
+                        savedFieldIndex,
+                        savedLineIndex,
+                        "visual delete",
+                    );
                 } else {
                     this.lastAction = "visual ignored key";
                 }
@@ -584,7 +603,6 @@
                 this.safeSyncLine("before operator " + op, {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
 
                 if (op === "d" && event.key === "d") {
@@ -607,7 +625,6 @@
                 this.safeSyncLine("escape normal", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
                 this.setMode("normal");
             } else if (event.key === "i") {
@@ -615,13 +632,14 @@
                 this.safeSyncLine("enter insert", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
+                this.unlockLineSync("enter insert");
                 this.setMode("insert");
             } else if (event.key === "a") {
                 this.lastAction = "append";
                 this.moveSelection("forward", "character");
                 this.scheduleSafeLineSync("append");
+                this.unlockLineSync("append insert");
                 this.setMode("insert");
             } else if (event.key === "o") {
                 this.lastAction = "open line below";
@@ -638,11 +656,13 @@
                 this.lastAction = "move down";
                 this.moveSelection("forward", "line");
                 this.moveTrackedLine(1, "normal j");
+                this.lockLineSync(this.vimLineIndex, 900, "normal j");
                 this.scheduleSafeLineSync("j");
             } else if (event.key === "k") {
                 this.lastAction = "move up";
                 this.moveSelection("backward", "line");
                 this.moveTrackedLine(-1, "normal k");
+                this.lockLineSync(this.vimLineIndex, 900, "normal k");
                 this.scheduleSafeLineSync("k");
             } else if (event.key === "0") {
                 this.lastAction = "line start";
@@ -656,8 +676,8 @@
                 this.safeSyncLine("operator d", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
+                this.lockLineSync(this.vimLineIndex, 1400, "operator d");
                 this.pendingOperator = "d";
                 this.lastAction = "waiting for delete motion";
                 this.updateStatus();
@@ -665,8 +685,8 @@
                 this.safeSyncLine("operator y", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
+                this.lockLineSync(this.vimLineIndex, 1400, "operator y");
                 this.pendingOperator = "y";
                 this.lastAction = "waiting for yank motion";
                 this.updateStatus();
@@ -676,15 +696,15 @@
                 this.safeSyncLine("paste p", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
+                this.lockLineSync(this.vimLineIndex, 1400, "paste p");
                 this.pasteYankText("p");
             } else if (event.key === "P") {
                 this.safeSyncLine("paste P", {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
+                this.lockLineSync(this.vimLineIndex, 1400, "paste P");
                 this.pasteYankText("P");
             }
 
@@ -827,6 +847,7 @@
 
                     if (oldIndex !== i) {
                         this.vimLineIndex = 0;
+                        this.unlockLineSync("field changed active");
                     }
 
                     this.syncPythonCurrentField(i);
@@ -865,6 +886,7 @@
 
                         if (oldIndex !== i) {
                             this.vimLineIndex = 0;
+                            this.unlockLineSync("field changed selection");
                         }
 
                         this.syncPythonCurrentField(i);
@@ -929,6 +951,7 @@
 
             if (oldIndex !== index) {
                 this.vimLineIndex = 0;
+                this.unlockLineSync("pointer field changed");
             }
 
             this.syncPythonCurrentField(index);
@@ -965,12 +988,9 @@
             this.lastPointerFieldIndex = this.fieldIndex;
             this.lastPointerTime = Date.now();
 
-            /*
-              Mouse click is a deliberate line choice. Apply it immediately.
-              Later fake selectionchange events are not allowed to reset it.
-            */
             this.vimLineIndex = lineIndex;
             this.normalizeVimLineIndex();
+            this.unlockLineSync("pointer line apply");
 
             this.lastAction =
                 "pointer line field=" +
@@ -1125,6 +1145,77 @@
             }
 
             return this.nodePlainText(field);
+        },
+
+        escapeHtml: function (value) {
+            return String(value || "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+        },
+
+        plainTextToHtml: function (value) {
+            return String(value || "")
+                .split("\n")
+                .map((line) => this.escapeHtml(line))
+                .join("<br>");
+        },
+
+        patchFieldTextFromPythonResult: function (result) {
+            if (!result || result.changed !== true) {
+                return false;
+            }
+
+            if (result.newText === undefined && result.newHtml === undefined) {
+                return false;
+            }
+
+            const field = this.fieldByIndex(
+                result.fieldIndex !== undefined
+                    ? result.fieldIndex
+                    : this.fieldIndex,
+            );
+
+            if (!field) {
+                return false;
+            }
+
+            const newText =
+                result.newText !== undefined
+                    ? String(result.newText)
+                    : this.htmlToPlainForPatch(String(result.newHtml || ""));
+
+            const control = this.editorControl(field);
+
+            /*
+              Important:
+              Python already updated note.fields. This patch is only to keep
+              the visible editor DOM synced. Do NOT dispatch input/change here,
+              because that makes Anki run its own editor update pipeline and it
+              can move the caret to the bottom or wrapper offset 0 after dd/p/P.
+            */
+            if (control && typeof control.value === "string") {
+                control.value = newText;
+                return true;
+            }
+
+            const html =
+                result.newHtml !== undefined
+                    ? String(result.newHtml)
+                    : this.plainTextToHtml(newText);
+
+            try {
+                field.innerHTML = html;
+                return true;
+            } catch (error) {
+                return false;
+            }
+        },
+
+        htmlToPlainForPatch: function (value) {
+            const div = document.createElement("div");
+            div.innerHTML = String(value || "");
+            return this.fragmentToPlainText(div).replace(/\n$/, "");
         },
 
         isBlockElement: function (node) {
@@ -1287,12 +1378,37 @@
             }
         },
 
+        isLineSyncLocked: function () {
+            return (
+                this.lockedVimLineIndex !== null &&
+                Date.now() < this.lineSyncLockUntil
+            );
+        },
+
+        lockLineSync: function (lineIndex, durationMs, reason) {
+            this.vimLineIndex = Math.max(0, Number(lineIndex) || 0);
+            this.lockedVimLineIndex = this.vimLineIndex;
+            this.lineSyncLockUntil = Date.now() + (durationMs || 1200);
+            this.lastInternalLineMoveTime = Date.now();
+            this.lastAction =
+                "locked line sync reason=" +
+                reason +
+                " line=" +
+                this.vimLineIndex;
+        },
+
+        unlockLineSync: function (reason) {
+            this.lockedVimLineIndex = null;
+            this.lineSyncLockUntil = 0;
+            this.lastAction =
+                (this.lastAction || "") + " | unlocked line sync " + reason;
+        },
+
         scheduleSafeLineSync: function (reason) {
             setTimeout(() => {
                 this.safeSyncLine(reason + " t0", {
                     allowPointer: false,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
             }, 0);
 
@@ -1300,7 +1416,6 @@
                 this.safeSyncLine(reason + " t50", {
                     allowPointer: false,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
             }, 50);
 
@@ -1308,7 +1423,6 @@
                 this.safeSyncLine(reason + " t160", {
                     allowPointer: false,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
             }, 160);
         },
@@ -1322,6 +1436,17 @@
                 this.currentField() || this.fieldByIndex(this.fieldIndex);
 
             if (!field) {
+                return false;
+            }
+
+            if (this.isLineSyncLocked()) {
+                this.vimLineIndex = this.lockedVimLineIndex;
+                this.normalizeVimLineIndex();
+                this.lastAction =
+                    "kept locked line reason=" +
+                    reason +
+                    " line=" +
+                    this.vimLineIndex;
                 return false;
             }
 
@@ -1343,11 +1468,6 @@
                 return true;
             }
 
-            /*
-              Use recent pointer only if it happened after the latest j/k
-              internal move. This prevents old mouse clicks from overriding
-              j/k navigation.
-            */
             if (
                 allowPointer &&
                 this.lastPointerFieldIndex === this.fieldIndex &&
@@ -1371,12 +1491,6 @@
                 const domLine = this.getCaretLineIndexFromDomSelection(field);
 
                 if (domLine !== null && domLine !== undefined) {
-                    /*
-                      Critical guard:
-                      If DOM says 0 right after j/k moved us away from 0, treat
-                      it as Anki's fake wrapper selection unless the internal
-                      line is also 0.
-                    */
                     if (
                         domLine === 0 &&
                         this.vimLineIndex > 0 &&
@@ -1424,9 +1538,44 @@
             return this.vimLineIndex;
         },
 
+        clampVimLineToCurrentText: function () {
+            const field = this.fieldByIndex(this.fieldIndex);
+
+            if (!field) {
+                this.vimLineIndex = 0;
+                return 0;
+            }
+
+            const text = this.getFieldPlainText(field);
+            const lines = text === "" ? [""] : String(text).split("\n");
+
+            this.vimLineIndex = Math.max(
+                0,
+                Math.min(Number(this.vimLineIndex) || 0, lines.length - 1),
+            );
+
+            return this.vimLineIndex;
+        },
+
         lineIndexFromOffset: function (text, offset) {
             const safeOffset = Math.max(0, Math.min(offset || 0, text.length));
             return text.slice(0, safeOffset).split("\n").length - 1;
+        },
+
+        offsetForLineIndex: function (text, lineIndex) {
+            const lines = String(text || "").split("\n");
+            const safeLine = Math.max(
+                0,
+                Math.min(Number(lineIndex) || 0, lines.length - 1),
+            );
+
+            let offset = 0;
+
+            for (let i = 0; i < safeLine; i++) {
+                offset += lines[i].length + 1;
+            }
+
+            return offset;
         },
 
         getCurrentFieldLineCountDebugOnly: function () {
@@ -1492,7 +1641,6 @@
                 this.safeSyncLine("send op " + op, {
                     allowPointer: true,
                     allowDom: true,
-                    allowFakeZero: false,
                 });
                 caretOffset = this.getCaretOffsetInField(field);
             }
@@ -1561,18 +1709,32 @@
 
             this.normalizeVimLineIndex();
 
+            const wantedFieldIndex = this.fieldIndex;
+            const wantedLineIndex = this.vimLineIndex;
+            const wantedCaretOffset =
+                result.caretOffset !== undefined
+                    ? result.caretOffset
+                    : this.pythonCaretOffset || 0;
+
+            this.lockLineSync(
+                wantedLineIndex,
+                300000,
+                "python result " + result.op,
+            );
+
+            this.patchFieldTextFromPythonResult(result);
+
+            this.fieldIndex = wantedFieldIndex;
+            this.vimLineIndex = wantedLineIndex;
+            this.lockedVimLineIndex = wantedLineIndex;
+            this.normalizeVimLineIndex();
+
             this.pendingOperator = null;
             this.mode = "normal";
             document.body.dataset.ankiVimMode = "normal";
             this.updateStatus();
 
             this.lastAction = result.action || result.error || "python op done";
-
-            const wantedFieldIndex = this.fieldIndex;
-            const wantedCaretOffset =
-                result.caretOffset !== undefined
-                    ? result.caretOffset
-                    : this.pythonCaretOffset || 0;
 
             const refocus = () => {
                 const field = this.fieldByIndex(wantedFieldIndex);
@@ -1583,27 +1745,32 @@
                     return;
                 }
 
-                this.focusFieldElement(field, false);
-
-                const restored = this.setCaretOffsetInField(
-                    field,
-                    wantedCaretOffset,
-                );
-
-                if (!restored) {
-                    this.focusFieldElement(field, false);
-                }
-
+                this.fieldIndex = wantedFieldIndex;
+                this.vimLineIndex = wantedLineIndex;
+                this.lockedVimLineIndex = wantedLineIndex;
                 this.normalizeVimLineIndex();
+
+                this.focusFieldElement(field, false);
+                this.setCaretOffsetInField(field, wantedCaretOffset, true);
+
+                this.fieldIndex = wantedFieldIndex;
+                this.vimLineIndex = wantedLineIndex;
+                this.lockedVimLineIndex = wantedLineIndex;
+                this.normalizeVimLineIndex();
+
                 this.refreshFieldOutline();
                 this.drawBlockCursor();
                 this.updateDebugIfVisible();
             };
 
+            refocus();
             setTimeout(refocus, 0);
-            setTimeout(refocus, 80);
-            setTimeout(refocus, 180);
-            setTimeout(refocus, 360);
+            setTimeout(refocus, 60);
+            setTimeout(refocus, 120);
+            setTimeout(refocus, 240);
+            setTimeout(refocus, 480);
+            setTimeout(refocus, 960);
+            setTimeout(refocus, 1500);
         },
 
         nativeFocusField: function (index, end) {
@@ -1627,7 +1794,8 @@
             this.syncPythonCurrentField(index);
 
             this.vimLineIndex = end ? 999999 : 0;
-            this.normalizeVimLineIndex();
+            this.clampVimLineToCurrentText();
+            this.unlockLineSync("native focus field");
 
             try {
                 if (
@@ -1688,11 +1856,13 @@
                     control.setSelectionRange(pos, pos);
                 } catch (error) {}
 
-                this.safeSyncLine("focus control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
+                if (!this.isLineSyncLocked()) {
+                    this.safeSyncLine("focus control", {
+                        allowPointer: false,
+                        allowDom: true,
+                    });
+                }
+
                 return;
             }
 
@@ -1758,6 +1928,62 @@
             setTimeout(tick, 180);
         },
 
+        forceNormalCursorRestore: function (fieldIndex, lineIndex, reason) {
+            const wantedFieldIndex =
+                fieldIndex !== undefined && fieldIndex !== null
+                    ? fieldIndex
+                    : this.fieldIndex;
+
+            const wantedLineIndex =
+                lineIndex !== undefined && lineIndex !== null
+                    ? lineIndex
+                    : this.vimLineIndex;
+
+            this.lockLineSync(wantedLineIndex, 7000, reason);
+
+            const restore = () => {
+                this.mode = "normal";
+                this.pendingOperator = null;
+                this.visualAnchorOffset = null;
+                document.body.dataset.ankiVimMode = "normal";
+                this.updateStatus();
+
+                this.fieldIndex = wantedFieldIndex;
+                this.vimLineIndex = wantedLineIndex;
+                this.lockedVimLineIndex = wantedLineIndex;
+                this.normalizeVimLineIndex();
+
+                const field = this.fieldByIndex(wantedFieldIndex);
+
+                if (field) {
+                    try {
+                        field.focus({ preventScroll: true });
+                    } catch (error) {
+                        try {
+                            field.focus();
+                        } catch (innerError) {}
+                    }
+
+                    this.refreshFieldOutline();
+                }
+
+                this.drawBlockCursor();
+                this.updateDebugIfVisible();
+
+                this.lastAction =
+                    (this.lastAction || "") +
+                    " | restored normal cursor after " +
+                    reason;
+            };
+
+            restore();
+            setTimeout(restore, 0);
+            setTimeout(restore, 60);
+            setTimeout(restore, 140);
+            setTimeout(restore, 280);
+            setTimeout(restore, 520);
+        },
+
         moveSelection: function (direction, granularity) {
             const field = this.ensureField();
 
@@ -1770,11 +1996,14 @@
 
             if (control) {
                 this.moveControlSelection(control, direction, granularity);
-                this.safeSyncLine("move control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
+
+                if (!this.isLineSyncLocked()) {
+                    this.safeSyncLine("move control", {
+                        allowPointer: false,
+                        allowDom: true,
+                    });
+                }
+
                 this.drawBlockCursorSoon();
                 return;
             }
@@ -1930,7 +2159,7 @@
             }
         },
 
-        setCaretOffsetInField: function (field, offset) {
+        setCaretOffsetInField: function (field, offset, skipSync) {
             if (!field) {
                 return false;
             }
@@ -1950,13 +2179,21 @@
                     control.setSelectionRange(pos, pos);
                 } catch (error) {}
 
-                this.safeSyncLine("set caret control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
+                if (!skipSync && !this.isLineSyncLocked()) {
+                    this.safeSyncLine("set caret control", {
+                        allowPointer: false,
+                        allowDom: true,
+                    });
+                }
+
                 return true;
             }
+
+            const text = this.getFieldPlainText(field);
+            const wantedOffset = Math.max(
+                0,
+                Math.min(offset || 0, text.length),
+            );
 
             try {
                 field.focus({ preventScroll: true });
@@ -1966,7 +2203,70 @@
                 } catch (innerError) {}
             }
 
-            return true;
+            const range = document.createRange();
+            const sel = window.getSelection();
+
+            if (!sel) {
+                return false;
+            }
+
+            let remaining = wantedOffset;
+            let foundNode = null;
+            let foundOffset = 0;
+
+            const walker = document.createTreeWalker(
+                field,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function (node) {
+                        if (!node.nodeValue || node.nodeValue.length === 0) {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+
+                        return NodeFilter.FILTER_ACCEPT;
+                    },
+                },
+            );
+
+            let node = walker.nextNode();
+
+            while (node) {
+                const length = node.nodeValue.length;
+
+                if (remaining <= length) {
+                    foundNode = node;
+                    foundOffset = remaining;
+                    break;
+                }
+
+                remaining -= length;
+                node = walker.nextNode();
+            }
+
+            try {
+                if (foundNode) {
+                    range.setStart(foundNode, foundOffset);
+                    range.collapse(true);
+                } else {
+                    range.selectNodeContents(field);
+                    range.collapse(false);
+                }
+
+                sel.removeAllRanges();
+                sel.addRange(range);
+                this.pythonCaretOffset = wantedOffset;
+
+                if (!skipSync && !this.isLineSyncLocked()) {
+                    this.safeSyncLine("set caret dom", {
+                        allowPointer: false,
+                        allowDom: true,
+                    });
+                }
+
+                return true;
+            } catch (error) {
+                return false;
+            }
         },
 
         getLineBounds: function (text, offset, includeNewline) {
@@ -2044,11 +2344,13 @@
                     control.setSelectionRange(safeCaret, safeCaret);
                 } catch (error) {}
 
-                this.safeSyncLine("replace text", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
+                if (!this.isLineSyncLocked()) {
+                    this.safeSyncLine("replace text", {
+                        allowPointer: false,
+                        allowDom: true,
+                    });
+                }
+
                 this.forceRefocusAndCursor(field);
                 return true;
             }
@@ -2075,8 +2377,8 @@
             this.safeSyncLine("enter visual", {
                 allowPointer: true,
                 allowDom: true,
-                allowFakeZero: false,
             });
+            this.lockLineSync(this.vimLineIndex, 1200, "enter visual");
 
             const control = this.editorControl(field);
 
@@ -2122,8 +2424,21 @@
             this.updateDebugIfVisible();
         },
 
-        exitVisualMode: function (collapseToStart) {
-            const savedFieldIndex = this.fieldIndex;
+        exitVisualMode: function (
+            collapseToStart,
+            forcedFieldIndex,
+            forcedLineIndex,
+        ) {
+            const savedFieldIndex =
+                forcedFieldIndex !== undefined && forcedFieldIndex !== null
+                    ? forcedFieldIndex
+                    : this.fieldIndex;
+
+            const savedLineIndex =
+                forcedLineIndex !== undefined && forcedLineIndex !== null
+                    ? forcedLineIndex
+                    : this.vimLineIndex;
+
             const field =
                 this.currentField() || this.fieldByIndex(savedFieldIndex);
             const control = field ? this.editorControl(field) : null;
@@ -2141,11 +2456,6 @@
                 } catch (error) {}
 
                 finalOffset = pos;
-                this.safeSyncLine("exit visual control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
             } else if (field) {
                 const sel = window.getSelection();
 
@@ -2154,13 +2464,12 @@
                     range.collapse(!!collapseToStart);
                     sel.removeAllRanges();
                     sel.addRange(range);
-                    this.safeSyncLine("exit visual dom", {
-                        allowPointer: false,
-                        allowDom: true,
-                        allowFakeZero: false,
-                    });
                 }
             }
+
+            this.fieldIndex = savedFieldIndex;
+            this.vimLineIndex = savedLineIndex;
+            this.lockLineSync(savedLineIndex, 7000, "exit visual");
 
             this.mode = "normal";
             this.pendingOperator = null;
@@ -2175,15 +2484,20 @@
                     return;
                 }
 
-                this.setCaretOffsetInField(target, finalOffset);
+                this.vimLineIndex = savedLineIndex;
+                this.lockedVimLineIndex = savedLineIndex;
+                this.setCaretOffsetInField(target, finalOffset, true);
                 this.forceRefocusAndCursor(target);
                 this.refreshFieldOutline();
                 this.drawBlockCursor();
                 this.updateDebugIfVisible();
             };
 
+            refocus();
             setTimeout(refocus, 0);
             setTimeout(refocus, 80);
+            setTimeout(refocus, 180);
+            setTimeout(refocus, 360);
         },
 
         extendVisualSelection: function (direction, granularity) {
@@ -2221,11 +2535,6 @@
                     );
                 } catch (error) {}
 
-                this.safeSyncLine("extend visual control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
                 return;
             }
 
@@ -2237,11 +2546,6 @@
 
             try {
                 sel.modify("extend", direction, granularity);
-                this.safeSyncLine("extend visual dom", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
             } catch (error) {
                 console.log("[Anki Vim] visual extend failed", error);
                 this.lastAction = "visual extend failed: " + error;
@@ -2330,11 +2634,6 @@
                 this.pythonCaretOffset = field
                     ? this.getCaretOffsetInField(field)
                     : this.pythonCaretOffset;
-                this.safeSyncLine("delete visual dom", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
                 this.lastAction =
                     "deleted selection: " + JSON.stringify(this.yankText);
             } catch (error) {
@@ -2354,24 +2653,40 @@
                 return;
             }
 
+            this.safeSyncLine("before open line below", {
+                allowPointer: true,
+                allowDom: true,
+            });
+
+            const sourceLine = Math.max(0, Number(this.vimLineIndex) || 0);
+            const targetLine = sourceLine + 1;
+
             const control = this.editorControl(field);
 
             if (control) {
                 const text = control.value || "";
-                const caret = control.selectionStart || 0;
-                const bounds = this.getLineBounds(text, caret, false);
+                const lineStart = this.offsetForLineIndex(text, sourceLine);
+                const bounds = this.getLineBounds(text, lineStart, false);
                 const insertAt = bounds.end;
                 const newText =
                     text.slice(0, insertAt) + "\n" + text.slice(insertAt);
 
-                this.replaceFieldPlainText(
-                    field,
-                    newText,
-                    insertAt + 1,
-                    "insertLineBreak",
-                );
+                control.value = newText;
+                this.dispatchInputForField(field, "insertLineBreak", "\n");
 
-                this.moveTrackedLine(1, "open line below control");
+                try {
+                    control.focus({ preventScroll: true });
+                } catch (error) {
+                    control.focus();
+                }
+
+                try {
+                    control.setSelectionRange(insertAt + 1, insertAt + 1);
+                } catch (error) {}
+
+                this.vimLineIndex = targetLine;
+                this.lockLineSync(targetLine, 2600, "open line insert target");
+
                 this.lastAction = "opened line below";
                 this.setMode("insert");
                 return;
@@ -2380,10 +2695,20 @@
             const sel = window.getSelection();
 
             try {
-                sel.modify("move", "forward", "lineboundary");
+                const text = this.getFieldPlainText(field);
+                const targetOffset = this.offsetForLineIndex(text, sourceLine);
+
+                this.setCaretOffsetInField(field, targetOffset, true);
+
+                if (sel && sel.rangeCount > 0) {
+                    sel.modify("move", "forward", "lineboundary");
+                }
+
                 document.execCommand("insertLineBreak");
-                this.moveTrackedLine(1, "open line below dom");
-                this.scheduleSafeLineSync("open line dom");
+
+                this.vimLineIndex = targetLine;
+                this.lockLineSync(targetLine, 2600, "open line below dom");
+
                 this.setMode("insert");
                 this.lastAction = "opened line below";
             } catch (error) {
@@ -2482,6 +2807,32 @@
             }, 0);
         },
 
+        getVirtualCaretRect: function (field) {
+            if (!field) {
+                return null;
+            }
+
+            this.clampVimLineToCurrentText();
+
+            const rect = field.getBoundingClientRect();
+            const style = window.getComputedStyle(field);
+            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
+            const paddingLeft = parseFloat(style.paddingLeft || "0") || 0;
+            const lineHeight = this.lineHeightPx(field);
+            const lineIndex = Math.max(0, Number(this.vimLineIndex) || 0);
+
+            return {
+                left: rect.left + paddingLeft + 3,
+                top:
+                    rect.top +
+                    paddingTop +
+                    lineHeight * lineIndex +
+                    Math.max(0, (lineHeight - 18) / 2),
+                width: 9,
+                height: Math.max(18, Math.min(lineHeight, 24)),
+            };
+        },
+
         getCaretRect: function () {
             const field = this.currentField();
 
@@ -2489,110 +2840,7 @@
                 return null;
             }
 
-            const control = this.editorControl(field);
-
-            if (control) {
-                const pos = control.selectionStart || 0;
-
-                try {
-                    const mirror = document.createElement("div");
-                    const style = window.getComputedStyle(control);
-
-                    mirror.style.position = "fixed";
-                    mirror.style.visibility = "hidden";
-                    mirror.style.whiteSpace = "pre-wrap";
-                    mirror.style.wordWrap = "break-word";
-                    mirror.style.overflow = "hidden";
-                    mirror.style.font = style.font;
-                    mirror.style.fontSize = style.fontSize;
-                    mirror.style.fontFamily = style.fontFamily;
-                    mirror.style.fontWeight = style.fontWeight;
-                    mirror.style.letterSpacing = style.letterSpacing;
-                    mirror.style.lineHeight = style.lineHeight;
-                    mirror.style.padding = style.padding;
-                    mirror.style.border = style.border;
-                    mirror.style.boxSizing = style.boxSizing;
-                    mirror.style.width =
-                        control.getBoundingClientRect().width + "px";
-
-                    const before = document.createTextNode(
-                        control.value.slice(0, pos),
-                    );
-                    const marker = document.createElement("span");
-                    marker.textContent =
-                        control.value.slice(pos, pos + 1) || " ";
-
-                    mirror.appendChild(before);
-                    mirror.appendChild(marker);
-                    document.body.appendChild(mirror);
-
-                    const controlRect = control.getBoundingClientRect();
-                    const markerRect = marker.getBoundingClientRect();
-                    const mirrorRect = mirror.getBoundingClientRect();
-
-                    const rect = {
-                        left:
-                            controlRect.left +
-                            (markerRect.left - mirrorRect.left) -
-                            control.scrollLeft,
-                        top:
-                            controlRect.top +
-                            (markerRect.top - mirrorRect.top) -
-                            control.scrollTop,
-                        width: Math.max(markerRect.width || 9, 9),
-                        height: Math.max(markerRect.height || 18, 18),
-                    };
-
-                    mirror.remove();
-                    return rect;
-                } catch (error) {}
-            }
-
-            const sel = window.getSelection();
-
-            if (sel && sel.rangeCount > 0) {
-                try {
-                    const range = sel.getRangeAt(0).cloneRange();
-
-                    if (
-                        field.contains(range.startContainer) ||
-                        field === range.startContainer
-                    ) {
-                        range.collapse(true);
-
-                        let rect = range.getBoundingClientRect();
-
-                        if (
-                            (!rect || rect.width === 0) &&
-                            range.startContainer
-                        ) {
-                            const marker = document.createElement("span");
-                            marker.textContent = "\u200b";
-                            range.insertNode(marker);
-                            rect = marker.getBoundingClientRect();
-                            marker.remove();
-                        }
-
-                        if (rect && rect.top && rect.left) {
-                            return {
-                                left: rect.left,
-                                top: rect.top,
-                                width: Math.max(rect.width || 9, 9),
-                                height: Math.max(rect.height || 18, 18),
-                            };
-                        }
-                    }
-                } catch (error) {}
-            }
-
-            const r = field.getBoundingClientRect();
-
-            return {
-                left: r.left + 5,
-                top: r.top + 5,
-                width: 9,
-                height: Math.min(Math.max(r.height - 10, 18), 22),
-            };
+            return this.getVirtualCaretRect(field);
         },
 
         drawBlockCursor: function () {
@@ -2735,6 +2983,9 @@
             lines.push(
                 "lastInternalLineMoveTime: " + this.lastInternalLineMoveTime,
             );
+            lines.push("lineSyncLockUntil: " + this.lineSyncLockUntil);
+            lines.push("lockedVimLineIndex: " + this.lockedVimLineIndex);
+            lines.push("isLineSyncLocked: " + this.isLineSyncLocked());
             lines.push(
                 "jsLineCountDebugOnly: " +
                     this.getCurrentFieldLineCountDebugOnly(),

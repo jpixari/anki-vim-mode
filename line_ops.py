@@ -46,10 +46,10 @@ class VimLineOps:
             line_index = 0
 
         if line_index < 0:
-            return 0
+            line_index = 0
 
         if line_index >= line_count:
-            return line_count - 1
+            line_index = line_count - 1
 
         return line_index
 
@@ -76,25 +76,21 @@ class VimLineOps:
         return text[:offset].count("\n")
 
     def safe_line_index(self, text, payload):
-        """
-        Linewise commands use the JS-side Vim line tracker.
-
-        Priority:
-        1. vimLineIndex: current normal-mode tracked line
-        2. currentLineIndex: compatibility with older JS
-        3. lineIndexHint: compatibility with older JS
-        4. caretOffset: fallback only
-        """
         lines = self.text_lines_keep_empty(text)
 
-        for key in ["vimLineIndex", "currentLineIndex", "lineIndexHint"]:
-            value = payload.get(key, None)
+        current = payload.get("vimLineIndex", None)
+        if current is not None:
+            return self.clamp_line_index(current, len(lines))
 
-            if value is not None:
-                return self.clamp_line_index(value, len(lines))
+        current = payload.get("currentLineIndex", None)
+        if current is not None:
+            return self.clamp_line_index(current, len(lines))
+
+        hint = payload.get("lineIndexHint", None)
+        if hint is not None:
+            return self.clamp_line_index(hint, len(lines))
 
         caret = payload.get("caretOffset", 0)
-
         return self.clamp_line_index(
             self.line_index_from_offset(text, caret),
             len(lines),
@@ -120,7 +116,7 @@ class VimLineOps:
 
         return index
 
-    def make_result(
+    def result(
         self,
         ok,
         op,
@@ -129,11 +125,13 @@ class VimLineOps:
         text,
         action,
         changed=False,
+        should_reload=False,
         error=None,
     ):
         lines = self.text_lines_keep_empty(text)
         safe_line = self.clamp_line_index(line_index, len(lines))
         caret = self.offset_for_line_index(text, safe_line)
+        html_text = self.plain_to_html(text)
 
         data = {
             "ok": ok,
@@ -146,47 +144,31 @@ class VimLineOps:
             "yankText": self.yank_text,
             "yankIsLine": self.yank_is_line,
             "action": action,
+            # JS uses this to patch the visible editor in place.
+            "changed": changed,
+            "newText": text,
+            "newHtml": html_text,
         }
 
         if error:
             data["error"] = error
 
-        return data, changed
+        # Second tuple value means "should vim_core reload the field?"
+        # Keep this False for dd/p/P so Anki does not move the caret to bottom.
+        return data, should_reload
 
-    def error_result(self, op, field_index, line_index, text, error):
-        if text is None:
-            text = ""
-
-        return self.make_result(
+    def error_result(self, op, field_index, line_index, text, error, action):
+        return self.result(
             ok=False,
             op=op,
             field_index=field_index,
             line_index=line_index,
             text=text,
-            action=error,
+            action=action,
             changed=False,
+            should_reload=False,
             error=error,
         )
-
-    def payload_yank(self, payload):
-        """
-        Prefer JS yank state when present, but fall back to Python yank state.
-        This avoids losing the yank after editor reload/reinjection.
-        """
-        payload_text = payload.get("yankText", None)
-
-        if payload_text is None or payload_text == "":
-            yank_text = self.yank_text
-            yank_is_line = self.yank_is_line
-        else:
-            yank_text = str(payload_text)
-
-            if "yankIsLine" in payload:
-                yank_is_line = bool(payload.get("yankIsLine"))
-            else:
-                yank_is_line = self.yank_is_line
-
-        return yank_text, yank_is_line
 
     def process(self, note, payload, fallback_field_index=0):
         if not note:
@@ -195,7 +177,8 @@ class VimLineOps:
                     "ok": False,
                     "op": payload.get("op"),
                     "error": "no note",
-                    "action": "no note",
+                    "action": "line op failed: no note",
+                    "changed": False,
                 },
                 False,
             )
@@ -213,7 +196,8 @@ class VimLineOps:
                     "ok": False,
                     "op": op,
                     "error": "bad field index",
-                    "action": "bad field index",
+                    "action": "line op failed: bad field index",
+                    "changed": False,
                 },
                 False,
             )
@@ -229,7 +213,7 @@ class VimLineOps:
             self.yank_text = yanked
             self.yank_is_line = True
 
-            return self.make_result(
+            return self.result(
                 ok=True,
                 op="yy",
                 field_index=field_index,
@@ -237,6 +221,7 @@ class VimLineOps:
                 text=text,
                 action=f"yy yanked line index={line_index} text={yanked!r}",
                 changed=False,
+                should_reload=False,
             )
 
         if op == "dd":
@@ -258,7 +243,7 @@ class VimLineOps:
             new_text = "\n".join(new_lines)
             note.fields[field_index] = self.plain_to_html(new_text)
 
-            return self.make_result(
+            return self.result(
                 ok=True,
                 op="dd",
                 field_index=field_index,
@@ -266,10 +251,12 @@ class VimLineOps:
                 text=new_text,
                 action=f"dd deleted line index={line_index} text={yanked!r}",
                 changed=True,
+                should_reload=False,
             )
 
         if op == "p" or op == "P":
-            yank_text, yank_is_line = self.payload_yank(payload)
+            yank_text = payload.get("yankText", self.yank_text)
+            yank_is_line = bool(payload.get("yankIsLine", self.yank_is_line))
 
             if not yank_text:
                 return self.error_result(
@@ -277,7 +264,8 @@ class VimLineOps:
                     field_index=field_index,
                     line_index=line_index,
                     text=text,
-                    error="paste failed: empty yank",
+                    error="empty yank",
+                    action="paste failed: empty yank",
                 )
 
             if yank_is_line:
@@ -299,10 +287,10 @@ class VimLineOps:
                 new_text = "\n".join(new_lines)
                 note.fields[field_index] = self.plain_to_html(new_text)
 
-                self.yank_text = line_text + "\n"
+                self.yank_text = str(yank_text)
                 self.yank_is_line = True
 
-                return self.make_result(
+                return self.result(
                     ok=True,
                     op=op,
                     field_index=field_index,
@@ -313,6 +301,7 @@ class VimLineOps:
                         f"text={line_text!r}"
                     ),
                     changed=True,
+                    should_reload=False,
                 )
 
             caret = payload.get("caretOffset", None)
@@ -336,7 +325,7 @@ class VimLineOps:
             self.yank_text = insert_text
             self.yank_is_line = False
 
-            return self.make_result(
+            return self.result(
                 ok=True,
                 op=op,
                 field_index=field_index,
@@ -346,6 +335,7 @@ class VimLineOps:
                     f"{op} pasted text index={new_line_index} " f"text={insert_text!r}"
                 ),
                 changed=True,
+                should_reload=False,
             )
 
         return self.error_result(
@@ -353,5 +343,6 @@ class VimLineOps:
             field_index=field_index,
             line_index=line_index,
             text=text,
-            error=f"unknown op {op!r}",
+            error="unknown op",
+            action=f"unknown op {op!r}",
         )

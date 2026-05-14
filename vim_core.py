@@ -208,24 +208,6 @@ class VimModeController(QObject):
         except Exception:
             callback()
 
-    def reload_field(self, index):
-        if not self.is_web_alive():
-            return
-
-        self.set_current_field_index(index)
-
-        try:
-            self.editor.loadNote(index)
-        except Exception:
-            try:
-                self.editor.loadNoteKeepingFocus()
-            except Exception:
-                pass
-
-        QTimer.singleShot(80, self.inject_all)
-        QTimer.singleShot(180, self.inject_all)
-        QTimer.singleShot(360, self.inject_all)
-
     def send_line_result(self, result):
         if not self.is_web_alive():
             return False
@@ -240,13 +222,6 @@ class VimModeController(QObject):
 
         return self.run_js(js)
 
-    def send_line_result_later(self, result, delay=180):
-        def later():
-            if self.is_web_alive():
-                self.send_line_result(result)
-
-        QTimer.singleShot(delay, later)
-
     def do_python_line_op(self, payload):
         if not self.is_web_alive():
             return
@@ -258,7 +233,7 @@ class VimModeController(QObject):
 
         fallback_field_index = self.current_field_index()
 
-        result, changed = self.line_ops.process(
+        result, should_reload = self.line_ops.process(
             note=note,
             payload=payload,
             fallback_field_index=fallback_field_index,
@@ -267,11 +242,14 @@ class VimModeController(QObject):
         field_index = result.get("fieldIndex", fallback_field_index)
         self.set_current_field_index(field_index)
 
-        if changed:
-            self.reload_field(field_index)
-            self.send_line_result_later(result, 180)
-        else:
-            self.send_line_result(result)
+        # Critical:
+        # Do NOT call editor.loadNote(), loadNoteKeepingFocus(), or reload_field()
+        # for dd / p / P. Reloading rebuilds Anki's editor DOM and causes delayed
+        # focus/selection events to move the cursor to the bottom or wrapper offset 0.
+        #
+        # line_ops already updates note.fields[field_index].
+        # editor_vim.js must patch the visible field in-place using result["newText"].
+        self.send_line_result(result)
 
     def on_js_message(self, handled, message, context):
         if not isinstance(message, str):
@@ -300,6 +278,7 @@ class VimModeController(QObject):
                     "ok": False,
                     "error": "bad json: " + str(error),
                     "action": "bad json",
+                    "changed": False,
                 }
             )
             return (True, None)
@@ -323,9 +302,8 @@ class VimModeController(QObject):
         text = event.text()
         modifiers = event.modifiers()
 
-        # IMPORTANT:
-        # Shift+J and Shift+K are handled in editor_vim.js, not here.
-        # If Qt catches them here, insert mode cannot type capital J/K.
+        # Shift+J and Shift+K are handled in editor_vim.js.
+        # Let them pass through here so insert mode can type capital J/K.
         shift_j = self.is_shift_j(key, modifiers)
         shift_k = self.is_shift_k(key, modifiers)
 
