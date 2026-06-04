@@ -46,3 +46,9 @@ some Vim-style operations are partially implemented but still considered incompl
 - deleting and yanking
 - more command-line commands
 - better cursor/focus handling after operations
+
+## V2.00 UPDATE
+- block cursor
+- visual mode
+- line tracking fixed
+- deleting and yanking SHOULD be working now

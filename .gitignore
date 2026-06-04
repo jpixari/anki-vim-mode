@@ -7,9 +7,6 @@ __pycache__/
 # OS junk
 .DS_Store
 
-# Claude Code local data
-.claude/
-
 # Env / secrets
 .env
 .env.*
@@ -40,3 +37,6 @@ auto-save-list/
 tramp
 .eshell/
 .elc
+
+# Claude
+.claude/

@@ -210,13 +210,16 @@
                 try {
                     const style = document.createElement("style");
                     style.id = "anki-vim-caret-style";
-                    // The normal-mode block cursor is a 1-char selection;
-                    // style the field's selection as a solid reverse-video
-                    // block so it reads as a real block cursor.
+                    // The normal-mode block cursor is a 1-char selection.
+                    // Style it as reverse video using Anki's own theme colors
+                    // (--fg / --canvas, which flip in night mode and inherit
+                    // through the shadow boundary). Fall back to the system
+                    // Canvas colors, which also adapt to color-scheme. This
+                    // keeps the block visible on light AND dark themes.
                     style.textContent =
                         "::selection{" +
-                        "background-color:rgba(40,42,54,0.92);" +
-                        "color:#f8f8f2;}";
+                        "background-color:var(--fg,CanvasText);" +
+                        "color:var(--canvas,Canvas);}";
                     root.appendChild(style);
                 } catch (error) {}
             }
@@ -1828,6 +1831,10 @@
             setTimeout(refocus, 180);
             setTimeout(refocus, 360);
             setTimeout(refocus, 720);
+            // Extra ticks outlast a slow loadNote rebuild so the caret ends on
+            // the target line rather than the default top/bottom.
+            setTimeout(refocus, 1100);
+            setTimeout(refocus, 1600);
         },
 
         nativeFocusField: function (index, end) {
@@ -2236,15 +2243,138 @@
                 return true;
             }
 
+            // Contenteditable: place the caret at the plain-text offset by
+            // mapping it directly to a DOM point (previously this only focused
+            // the field, so after a dd/p reload the caret defaulted to the
+            // end). Direct placement is deterministic and does not depend on
+            // focus/active-selection timing the way Selection.modify does.
+            const editable = this.editableElement(field);
+            const sel = this.editableSelection(field);
+
             try {
-                field.focus({ preventScroll: true });
+                (editable || field).focus({ preventScroll: true });
             } catch (error) {
                 try {
-                    field.focus();
+                    (editable || field).focus();
                 } catch (innerError) {}
             }
 
+            if (!editable || !sel) {
+                return true;
+            }
+
+            // Map the plain-text offset straight to a DOM point in the live
+            // editable (no dependency on getFieldPlainText, which can be empty
+            // mid-reload) and set the caret with sel.collapse() -- the same
+            // API the block cursor uses, which reliably moves the real caret.
+            const safeOffset = Math.max(0, offset || 0);
+            const point = this.domPointForOffset(editable, safeOffset);
+
+            if (point && point.node) {
+                try {
+                    sel.collapse(point.node, point.offset);
+                } catch (error) {}
+            }
+
+            this.safeSyncLine("set caret content", {
+                allowPointer: false,
+                allowDom: true,
+                allowFakeZero: false,
+            });
+
             return true;
+        },
+
+        // Map a plain-text offset (as produced by fragmentToPlainText) to a
+        // DOM caret point {node, offset} inside the editable. Handles text
+        // nodes and <br> line breaks at any depth, plus block-element
+        // boundaries, so the caret lands on the right line after a reload.
+        domPointForOffset: function (editable, target) {
+            if (!editable) {
+                return null;
+            }
+
+            let pos = 0;
+            let result = null;
+
+            const visit = (node) => {
+                if (result) {
+                    return;
+                }
+
+                const children = Array.from(node.childNodes || []);
+
+                for (let i = 0; i < children.length; i++) {
+                    if (result) {
+                        return;
+                    }
+
+                    const child = children[i];
+
+                    if (child.nodeType === Node.TEXT_NODE) {
+                        const len = (child.nodeValue || "").length;
+
+                        if (target <= pos + len) {
+                            result = { node: child, offset: target - pos };
+                            return;
+                        }
+
+                        pos += len;
+                        continue;
+                    }
+
+                    if (child.nodeType !== Node.ELEMENT_NODE) {
+                        continue;
+                    }
+
+                    const tag = child.tagName.toLowerCase();
+
+                    if (tag === "br") {
+                        if (target <= pos) {
+                            result = { node: node, offset: i };
+                            return;
+                        }
+
+                        pos += 1;
+
+                        if (target <= pos) {
+                            result = { node: node, offset: i + 1 };
+                            return;
+                        }
+
+                        continue;
+                    }
+
+                    const isBlock = this.isBlockElement(child);
+                    const before = pos;
+
+                    visit(child);
+
+                    if (result) {
+                        return;
+                    }
+
+                    if (isBlock && (pos === before || pos > 0)) {
+                        if (target <= pos) {
+                            result = {
+                                node: child,
+                                offset: child.childNodes.length,
+                            };
+                            return;
+                        }
+
+                        pos += 1;
+                    }
+                }
+            };
+
+            visit(editable);
+
+            if (!result) {
+                result = { node: editable, offset: editable.childNodes.length };
+            }
+
+            return result;
         },
 
         getLineBounds: function (text, offset, includeNewline) {
