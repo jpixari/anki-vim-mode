@@ -3,9 +3,9 @@ from aqt.utils import tooltip
 
 
 class VimCommandLine(QDialog):
-    def __init__(self, addcards, controller):
-        super().__init__(addcards)
-        self.addcards = addcards
+    def __init__(self, window, controller):
+        super().__init__(window)
+        self.window = window
         self.controller = controller
 
         self.setWindowTitle("Vim Command")
@@ -32,27 +32,20 @@ class VimCommandLine(QDialog):
             command = command[1:]
 
         if command == "w":
-            self.write_card()
+            self.controller.save_note()
             self.close()
             self.controller.set_mode("normal")
             return
 
         if command == "wq":
-            self.write_card()
+            self.controller.save_note()
             self.close()
-            self.addcards.close()
+            self.controller.close_window()
             return
 
         if command == "q":
             self.close()
-            self.addcards.close()
+            self.controller.close_window()
             return
 
         tooltip(f"Unknown Vim command: {command}")
-
-    def write_card(self):
-        try:
-            self.addcards.addCards()
-            tooltip("Card added")
-        except Exception as error:
-            tooltip(f"Could not add card: {error}")

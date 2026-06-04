@@ -83,8 +83,9 @@ body[data-anki-vim-mode="visual"] #anki-vim-status {
 #anki-vim-block-cursor {
   position: fixed;
   z-index: 2147483647;
-  background: black;
-  opacity: 0.85;
+  /* Reverse-video caret: white source + difference blend inverts the
+     backdrop, so it is visible on light fields and dark text alike. */
+  background: rgba(255, 255, 255, 0.95);
   pointer-events: none;
   width: 9px;
   height: 18px;

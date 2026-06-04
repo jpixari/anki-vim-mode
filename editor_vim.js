@@ -36,6 +36,7 @@
 
         init: function () {
             this.installStyle();
+            this.installShadowCaretStyle();
             this.cleanupOldLineCursor();
             this.makeStatus();
             this.installKeyHandler();
@@ -168,7 +169,13 @@
                     position: fixed;
                     z-index: 2147483647;
                     pointer-events: none;
-                    background: rgba(0, 0, 0, 0.78);
+                    /*
+                      Reverse-video caret: a WHITE source under difference
+                      blending inverts whatever is behind it, so the block is
+                      visible on both light fields and dark text/themes. A black
+                      source here would be a no-op (invisible).
+                    */
+                    background: rgba(255, 255, 255, 0.95);
                     mix-blend-mode: difference;
                     width: 9px;
                     height: 18px;
@@ -180,6 +187,39 @@
                     display: none !important;
                 }
             `;
+        },
+
+        // The editable lives in an open shadow root, so document ::selection
+        // CSS can't reach it. Inject a tiny stylesheet into each field's shadow
+        // root so the normal-mode block (a 1-char selection of the glyph under
+        // the caret) is drawn as a solid reverse-video block cursor.
+        installShadowCaretStyle: function () {
+            const fields = this.fields();
+
+            for (const field of fields) {
+                const root = this.shadowRootFor(field);
+
+                if (!root || !root.querySelector) {
+                    continue;
+                }
+
+                if (root.querySelector("#anki-vim-caret-style")) {
+                    continue;
+                }
+
+                try {
+                    const style = document.createElement("style");
+                    style.id = "anki-vim-caret-style";
+                    // The normal-mode block cursor is a 1-char selection;
+                    // style the field's selection as a solid reverse-video
+                    // block so it reads as a real block cursor.
+                    style.textContent =
+                        "::selection{" +
+                        "background-color:rgba(40,42,54,0.92);" +
+                        "color:#f8f8f2;}";
+                    root.appendChild(style);
+                } catch (error) {}
+            }
         },
 
         cleanupOldLineCursor: function () {
@@ -227,6 +267,7 @@
         setMode: function (mode) {
             this.mode = mode;
             document.body.dataset.ankiVimMode = mode;
+            this.syncPythonMode(mode);
 
             if (mode !== "normal") {
                 this.pendingOperator = null;
@@ -236,10 +277,17 @@
             this.ensureField();
             this.refreshFieldOutline();
 
+            this.installShadowCaretStyle();
+            this.removeBlockCursor();
+
             if (mode === "normal") {
-                this.drawBlockCursorSoon();
+                // Show the block (1-char selection) once focus settles.
+                this.placeBlockCaret();
+                setTimeout(() => this.placeBlockCaret(), 0);
             } else {
-                this.removeBlockCursor();
+                // Collapse the block so insert/visual start from a plain caret
+                // and typing doesn't overwrite the highlighted character.
+                this.collapseBlockToCursor();
             }
 
             this.updateDebugIfVisible();
@@ -993,6 +1041,18 @@
             }
         },
 
+        syncPythonMode: function (mode) {
+            // Let Python know the live mode so the ":" command line only
+            // opens in normal mode (and ":" can be typed in insert/visual).
+            try {
+                if (typeof pycmd === "function") {
+                    pycmd("vimmode:" + mode);
+                }
+            } catch (error) {
+                console.log("[Anki Vim] pycmd mode failed", error);
+            }
+        },
+
         isVisibleControl: function (el, fieldRect) {
             if (!el) {
                 return false;
@@ -1246,8 +1306,85 @@
             return false;
         },
 
+        // Anki's editor fields live inside an open shadow root. The caret/
+        // selection is INSIDE that shadow tree, so window.getSelection() only
+        // returns a retargeted host-level range. We must read the selection
+        // from the shadow root itself (Chromium's ShadowRoot.getSelection()).
+        shadowRootFor: function (field) {
+            if (!field) {
+                return null;
+            }
+
+            if (
+                field.shadowRoot &&
+                typeof field.shadowRoot.getSelection === "function"
+            ) {
+                return field.shadowRoot;
+            }
+
+            if (field.querySelectorAll) {
+                for (const el of Array.from(field.querySelectorAll("*"))) {
+                    if (
+                        el.shadowRoot &&
+                        typeof el.shadowRoot.getSelection === "function"
+                    ) {
+                        return el.shadowRoot;
+                    }
+                }
+            }
+
+            let parent = field.parentElement;
+            let depth = 0;
+
+            while (parent && depth < 4) {
+                if (
+                    parent.shadowRoot &&
+                    typeof parent.shadowRoot.getSelection === "function"
+                ) {
+                    return parent.shadowRoot;
+                }
+
+                parent = parent.parentElement;
+                depth++;
+            }
+
+            return null;
+        },
+
+        // The Selection object that actually contains the caret for this field.
+        editableSelection: function (field) {
+            const root = this.shadowRootFor(field);
+
+            if (root) {
+                try {
+                    return root.getSelection();
+                } catch (error) {}
+            }
+
+            return window.getSelection();
+        },
+
+        // The element whose text content the caret offset/line is measured in.
+        editableElement: function (field) {
+            const root = this.shadowRootFor(field);
+
+            if (root) {
+                const editable = root.querySelector(
+                    'anki-editable,[contenteditable="true"],' +
+                        '[contenteditable=""],[contenteditable="plaintext-only"]',
+                );
+
+                if (editable) {
+                    return editable;
+                }
+            }
+
+            return field;
+        },
+
         getCaretLineIndexFromDomSelection: function (field) {
-            const sel = window.getSelection();
+            const sel = this.editableSelection(field);
+            const editable = this.editableElement(field);
 
             if (!field || !sel || sel.rangeCount === 0) {
                 return null;
@@ -1256,15 +1393,15 @@
             const range = sel.getRangeAt(0);
 
             if (
-                !field.contains(range.startContainer) &&
-                field !== range.startContainer
+                !editable.contains(range.startContainer) &&
+                editable !== range.startContainer
             ) {
                 return null;
             }
 
             try {
                 const pre = document.createRange();
-                pre.selectNodeContents(field);
+                pre.selectNodeContents(editable);
                 pre.setEnd(range.startContainer, range.startOffset);
 
                 const fragment = pre.cloneContents();
@@ -1272,7 +1409,7 @@
 
                 if (
                     this.isProbablyFakeRootZeroSelection(
-                        field,
+                        editable,
                         range,
                         beforeText,
                     )
@@ -1302,9 +1439,9 @@
         },
 
         forceVirtualBlockCursor: function (durationMs, reason) {
-            this.virtualBlockCursorUntil = Date.now() + (durationMs || 1200);
+            // No-op: the cursor is now the real caret (caret-shape), so there
+            // is no virtual/overlay block to force. Kept for call-site compat.
             this.virtualBlockCursorReason = reason || "";
-            this.drawBlockCursorSoon();
         },
 
         scheduleSafeLineSync: function (reason) {
@@ -1534,6 +1671,12 @@
         },
 
         moveTrackedLine: function (delta, reason) {
+            // An explicit j/k move means any line-sync lock left over from a
+            // previous dd/yy/p is stale. Clear it so DOM line detection (now
+            // reliable via the shadow root) isn't pinned to the old line.
+            this.lockedVimLineIndex = null;
+            this.lineSyncLockUntil = 0;
+
             this.vimLineIndex = (Number(this.vimLineIndex) || 0) + delta;
             this.normalizeVimLineIndex();
             this.lastInternalLineMoveTime = Date.now();
@@ -1641,6 +1784,7 @@
             this.pendingOperator = null;
             this.mode = "normal";
             document.body.dataset.ankiVimMode = "normal";
+            this.syncPythonMode("normal");
             this.updateStatus();
 
             this.lastAction = result.action || result.error || "python op done";
@@ -1851,6 +1995,7 @@
                 this.pendingOperator = null;
                 this.visualAnchorOffset = null;
                 document.body.dataset.ankiVimMode = "normal";
+                this.syncPythonMode("normal");
                 this.updateStatus();
 
                 const field = this.fieldByIndex(wantedFieldIndex);
@@ -1905,7 +2050,7 @@
                 return;
             }
 
-            const sel = window.getSelection();
+            const sel = this.editableSelection(field);
 
             if (!sel || sel.rangeCount === 0) {
                 this.focusField(this.fieldIndex, true);
@@ -1913,13 +2058,19 @@
             }
 
             try {
+                // Collapse the block back to the caret before moving so the
+                // move starts from the cursor, not a selection edge.
+                if (!sel.isCollapsed) {
+                    sel.collapse(sel.anchorNode, sel.anchorOffset);
+                }
+
                 sel.modify("move", direction, granularity);
             } catch (error) {
                 console.log("[Anki Vim] selection.modify failed", error);
                 this.lastAction = "move failed: " + error;
             }
 
-            this.drawBlockCursorSoon();
+            this.placeBlockCaret();
         },
 
         moveControlSelection: function (control, direction, granularity) {
@@ -2017,7 +2168,8 @@
                 );
             }
 
-            const sel = window.getSelection();
+            const sel = this.editableSelection(field);
+            const editable = this.editableElement(field);
 
             if (!field || !sel || sel.rangeCount === 0) {
                 return this.pythonCaretOffset || 0;
@@ -2026,15 +2178,15 @@
             const range = sel.getRangeAt(0);
 
             if (
-                !field.contains(range.startContainer) &&
-                field !== range.startContainer
+                !editable.contains(range.startContainer) &&
+                editable !== range.startContainer
             ) {
                 return this.pythonCaretOffset || 0;
             }
 
             try {
                 const pre = document.createRange();
-                pre.selectNodeContents(field);
+                pre.selectNodeContents(editable);
                 pre.setEnd(range.startContainer, range.startOffset);
 
                 const fragment = pre.cloneContents();
@@ -2042,7 +2194,7 @@
 
                 if (
                     this.isProbablyFakeRootZeroSelection(
-                        field,
+                        editable,
                         range,
                         beforeText,
                     )
@@ -2198,6 +2350,10 @@
                 return;
             }
 
+            // Collapse the normal-mode block to a plain caret first, so visual
+            // mode starts by selecting a single character at the cursor.
+            this.collapseBlockToCursor();
+
             this.safeSyncLine("enter visual", {
                 allowPointer: true,
                 allowDom: true,
@@ -2214,6 +2370,7 @@
 
                 this.mode = "visual";
                 document.body.dataset.ankiVimMode = "visual";
+                this.syncPythonMode("visual");
                 this.pendingOperator = null;
                 this.lastAction = "entered visual mode";
                 this.updateStatus();
@@ -2236,6 +2393,7 @@
 
             this.mode = "visual";
             document.body.dataset.ankiVimMode = "visual";
+            this.syncPythonMode("visual");
             this.pendingOperator = null;
             this.lastAction = "entered visual mode";
             this.updateStatus();
@@ -2277,7 +2435,7 @@
                     allowFakeZero: false,
                 });
             } else if (field) {
-                const sel = window.getSelection();
+                const sel = this.editableSelection(field);
 
                 if (sel && sel.rangeCount > 0) {
                     const range = sel.getRangeAt(0).cloneRange();
@@ -2296,6 +2454,7 @@
             this.pendingOperator = null;
             this.visualAnchorOffset = null;
             document.body.dataset.ankiVimMode = "normal";
+            this.syncPythonMode("normal");
             this.updateStatus();
             this.forceVirtualBlockCursor(1400, "exit visual");
 
@@ -2393,7 +2552,9 @@
                 );
             }
 
-            const sel = window.getSelection();
+            // Read from the shadow-root selection so the selected text is the
+            // real content inside the field, not the retargeted host range.
+            const sel = this.editableSelection(field);
 
             if (!sel || sel.rangeCount === 0) {
                 return "";
@@ -2632,9 +2793,97 @@
             }
         },
 
+        // The normal-mode block cursor is a real 1-character selection of the
+        // glyph under the caret (styled like a block). Because it IS the
+        // selection, it can never drift from the real caret position.
+
+        // Collapse the block back to the caret. We always anchor the block at
+        // the caret, so collapsing to the anchor restores a plain caret there.
+        collapseBlockToCursor: function () {
+            const field = this.currentField();
+
+            if (!field) {
+                return;
+            }
+
+            const sel = this.editableSelection(field);
+
+            if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+                return;
+            }
+
+            try {
+                sel.collapse(sel.anchorNode, sel.anchorOffset);
+            } catch (error) {}
+        },
+
+        placeBlockCaret: function () {
+            if (this.mode !== "normal") {
+                return;
+            }
+
+            const field = this.currentField();
+
+            if (!field) {
+                return;
+            }
+
+            const sel = this.editableSelection(field);
+
+            if (!sel || sel.rangeCount === 0) {
+                return;
+            }
+
+            // Already a single-character block on one line: leave it alone so
+            // we don't fight selectionchange events (infinite re-place loop).
+            let current = "";
+
+            try {
+                current = sel.toString();
+            } catch (error) {}
+
+            if (
+                !sel.isCollapsed &&
+                current.length === 1 &&
+                current !== "\n"
+            ) {
+                return;
+            }
+
+            // Start from the caret (anchor) and cover the character to the
+            // right. At end of line that would grab the newline, so fall back
+            // to covering the character to the left; on an empty line, leave a
+            // plain caret.
+            try {
+                sel.collapse(sel.anchorNode, sel.anchorOffset);
+                sel.modify("extend", "forward", "character");
+
+                let text = "";
+
+                try {
+                    text = sel.toString();
+                } catch (error) {}
+
+                if (text === "" || text.indexOf("\n") !== -1) {
+                    sel.collapse(sel.anchorNode, sel.anchorOffset);
+                    sel.modify("extend", "backward", "character");
+
+                    let back = "";
+
+                    try {
+                        back = sel.toString();
+                    } catch (error) {}
+
+                    if (back === "" || back.indexOf("\n") !== -1) {
+                        sel.collapse(sel.anchorNode, sel.anchorOffset);
+                    }
+                }
+            } catch (error) {}
+        },
+
         drawBlockCursorSoon: function () {
             setTimeout(() => {
-                this.drawBlockCursor();
+                this.placeBlockCaret();
             }, 0);
         },
 
@@ -2740,36 +2989,37 @@
                 } catch (error) {}
             }
 
-            const sel = window.getSelection();
+            // Read the real caret from the field's shadow-root selection. A
+            // collapsed range still reports a correct top/left/height (just
+            // zero width), so we never mutate the editable to measure it.
+            const sel = this.editableSelection(field);
+            const editable = this.editableElement(field);
 
             if (sel && sel.rangeCount > 0) {
                 try {
                     const range = sel.getRangeAt(0).cloneRange();
 
                     if (
-                        field.contains(range.startContainer) ||
-                        field === range.startContainer
+                        editable.contains(range.startContainer) ||
+                        editable === range.startContainer
                     ) {
                         range.collapse(true);
 
                         let rect = range.getBoundingClientRect();
 
-                        if (
-                            (!rect || rect.width === 0) &&
-                            range.startContainer
-                        ) {
-                            const marker = document.createElement("span");
-                            marker.textContent = "\u200b";
-                            range.insertNode(marker);
-                            rect = marker.getBoundingClientRect();
-                            marker.remove();
+                        if (!rect || (!rect.top && !rect.left)) {
+                            const rects = range.getClientRects();
+
+                            if (rects && rects.length) {
+                                rect = rects[0];
+                            }
                         }
 
-                        if (rect && rect.top && rect.left) {
+                        if (rect && (rect.top || rect.left)) {
                             return {
                                 left: rect.left,
                                 top: rect.top,
-                                width: Math.max(rect.width || 9, 9),
+                                width: 9,
                                 height: Math.max(rect.height || 18, 18),
                             };
                         }
@@ -2794,25 +3044,8 @@
         },
 
         drawBlockCursor: function () {
-            if (this.mode !== "normal") {
-                this.removeBlockCursor();
-                return;
-            }
-
-            const rect = this.getCaretRect();
-
-            if (!rect) {
-                this.removeBlockCursor();
-                return;
-            }
-
-            const cursor = this.getOrCreateBlockCursor();
-
-            cursor.style.left = rect.left + "px";
-            cursor.style.top = rect.top + "px";
-            cursor.style.width = Math.max(rect.width || 9, 9) + "px";
-            cursor.style.height = Math.max(rect.height || 18, 18) + "px";
-            cursor.style.display = "block";
+            this.removeBlockCursor();
+            this.placeBlockCaret();
         },
 
         selectionInfo: function () {

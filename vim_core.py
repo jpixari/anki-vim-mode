@@ -5,6 +5,7 @@ import os
 
 from aqt import gui_hooks
 from aqt.qt import QObject, QEvent, Qt, QApplication, QTimer
+from aqt.utils import tooltip
 
 from .command_line import VimCommandLine
 from .line_ops import VimLineOps
@@ -15,16 +16,21 @@ CSS_PATH = os.path.join(ADDON_DIR, "editor_vim.css")
 
 
 class VimModeController(QObject):
-    def __init__(self, addcards):
-        super().__init__(addcards)
+    def __init__(self, editor):
+        self.editor = editor
+        self.window = getattr(editor, "parentWindow", None)
 
-        self.addcards = addcards
-        self.editor = addcards.editor
+        super().__init__(self.window)
+
+        # Add Cards uses `:w` to add the note; other editors save inline.
+        self.is_add_mode = bool(getattr(editor, "addMode", False))
         self.mode = "normal"
-        self.command_line = VimCommandLine(addcards, self)
+        self.command_line = VimCommandLine(self.window, self)
         self.line_ops = VimLineOps()
 
-        addcards.installEventFilter(self)
+        if self.window is not None:
+            self.window.installEventFilter(self)
+
         self.editor.web.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
 
@@ -32,7 +38,46 @@ class VimModeController(QObject):
         # Do not use: `if callback not in gui_hooks...`
         gui_hooks.webview_did_receive_js_message.append(self.on_js_message)
 
+        # Remove our message hook when the window goes away so editors opened
+        # later do not accumulate dead handlers.
+        if self.window is not None:
+            try:
+                self.window.destroyed.connect(self.remove_hooks)
+            except Exception:
+                pass
+
         self.inject_repeatedly()
+
+    def remove_hooks(self, *args):
+        try:
+            gui_hooks.webview_did_receive_js_message.remove(self.on_js_message)
+        except Exception:
+            pass
+
+    def save_note(self):
+        if self.is_add_mode and self.window is not None:
+            try:
+                self.window.addCards()
+                tooltip("Card added")
+            except Exception as error:
+                tooltip(f"Could not add card: {error}")
+            return
+
+        # Editing an existing note: edits are persisted as fields change, so
+        # just flush the current field and confirm.
+        try:
+            self.editor.call_after_note_saved(lambda: None, keepFocus=True)
+        except Exception:
+            pass
+
+        tooltip("Saved")
+
+    def close_window(self):
+        try:
+            if self.window is not None:
+                self.window.close()
+        except Exception:
+            pass
 
     def web(self):
         try:
@@ -134,9 +179,18 @@ class VimModeController(QObject):
         except Exception:
             return False
 
-    def is_add_window_active(self):
+    def set_mode(self, mode):
+        self.mode = mode
+        self.run_js(f"""
+            if (window.ankiVim && window.ankiVim.setMode) {{
+                window.ankiVim.setMode({json.dumps(mode)});
+                window.ankiVim.updateDebugIfVisible();
+            }}
+        """)
+
+    def is_window_active(self):
         try:
-            return QApplication.activeWindow() is self.addcards
+            return QApplication.activeWindow() is self.window
         except Exception:
             return False
 
@@ -274,6 +328,11 @@ class VimModeController(QObject):
             self.send_line_result(result)
 
     def on_js_message(self, handled, message, context):
+        # This hook is global; only handle messages from our own editor so
+        # multiple open editors do not cross-talk.
+        if context is not self.editor:
+            return handled
+
         if not isinstance(message, str):
             return handled
 
@@ -284,6 +343,10 @@ class VimModeController(QObject):
             except Exception:
                 pass
 
+            return (True, None)
+
+        if message.startswith("vimmode:"):
+            self.mode = message[len("vimmode:") :]
             return (True, None)
 
         if not message.startswith("anki_vim:"):
@@ -316,7 +379,7 @@ class VimModeController(QObject):
         ]:
             return False
 
-        if not self.is_add_window_active():
+        if not self.is_window_active():
             return False
 
         key = event.key()
@@ -349,14 +412,18 @@ class VimModeController(QObject):
             """)
             return True
 
+        # Only the colon command line is a Python-side normal-mode shortcut.
+        # In insert/visual mode ":" must reach the editor so it can be typed.
+        is_colon = text == ":" or key == Qt.Key.Key_Colon
+
         if event_type == QEvent.Type.ShortcutOverride:
-            if text == ":" or key == Qt.Key.Key_Colon:
+            if is_colon and self.mode == "normal":
                 event.accept()
                 return True
 
             return False
 
-        if text == ":" or key == Qt.Key.Key_Colon:
+        if is_colon and self.mode == "normal":
             event.accept()
             self.command_line.open()
             return True
@@ -364,5 +431,8 @@ class VimModeController(QObject):
         return False
 
 
-def install_vim_mode(addcards):
-    addcards.vim_mode_controller = VimModeController(addcards)
+def install_vim_mode(editor):
+    if getattr(editor, "vim_mode_controller", None) is not None:
+        return
+
+    editor.vim_mode_controller = VimModeController(editor)
