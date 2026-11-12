@@ -40,3 +40,9 @@ tramp
 
 # Claude
 .claude/
+
+# Build output
+*.ankiaddon
+
+# Written by Anki into the add-on folder (your local settings)
+meta.json

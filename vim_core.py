@@ -30,41 +30,52 @@ DEFAULT_CONFIG = {
     "system_clipboard": False,
     "jk_display_lines": False,
     "show_status": True,
+    "status_position": "bottom-left",
+    "vim_ctrl_keys": False,
 }
 
 HELP_TEXT = """Anki Vim Mode
 
 MODES
-  Esc / Ctrl-[        normal mode          i a I A o O     insert
-  v                   visual               V               visual line
+  Esc / Ctrl-[        normal mode          i a I A o O gi  insert
+  v  V  Ctrl-q        visual / line / block               R  replace
 
 MOVING
-  h j k l             left/down/up/right   w b e  W B E    words
-  0 ^ $               line start/end       gg G  {n}G      first/last/line n
+  h j k l             left/down/up/right   w b e ge        words (W B E gE)
+  0 ^ $ g_            line start/end       gg G {n}G H M L lines
   f F t T {char}      find on line         ; ,             repeat find
-  { }                 paragraphs           %               matching bracket
+  { }  ( )            paragraphs/sentences %               matching bracket
   gj gk               display lines        J K             next/previous field
+  m{a-z}  `{a-z}      set / jump to mark   ``              back to last jump
 
 EDITING
   d c y {motion}      delete/change/yank   dd cc yy        whole lines
-  x X s S D C Y       shortcuts            p P             paste after/before
+  x X s S D C Y       shortcuts            p P gp gP       paste
   r{char}  ~          replace / flip case  gu gU g~        change case
-  gJ                  join lines           .               repeat last change
-  u  Ctrl-r           undo / redo          "{reg}          use a register
+  gJ                  join lines           > <             indent / outdent
+  .                   repeat last change   u  Ctrl-r       undo / redo
+  "{reg}              use a register       q{reg} @{reg}   record / play macro
+  gc gC {motion}      make a cloze deletion (new number / same number)
 
-TEXT OBJECTS (after d c y v, with i = inner, a = around)
+TEXT OBJECTS (after d c y v gc, with i = inner, a = around)
   w W                 word                 " ' `           quotes
-  ( [ { <             brackets             p               paragraph
+  ( [ { <             brackets             p  s            paragraph, sentence
   c                   cloze deletion: cic changes the answer of {{c1::...}}
+
+VISUAL BLOCK (Ctrl-q)
+  I A c               insert/append/change on every line   d y p r ~ u U
 
 SEARCH AND COMMANDS
   /text  ?text        search               n N  * #        next/previous/word
   :s/old/new/g        replace on line      :%s/old/new/g   replace in field
+  &  g&               repeat substitute    :{n}            go to line n
+  :m {n}  :t {n}      move / copy lines    :normal {keys}  run keys on lines
   :w                  add / save note      :wq  :q         and close / close
-  :{n}                go to line n         :reg            show registers
+  :reg  :marks        show registers / marks
 
-A count works in front of most commands: 3dd, 2dw, 5j, d3w.
-Settings: Tools > Add-ons > Anki Vim Mode > Config.
+A count works in front of most commands: 3dd, 2dw, 5j, d3w, 3., 3ix<Esc>.
+In visual mode Anki's own shortcuts (Ctrl+B, Ctrl+Shift+C ...) act on the
+selection. Settings: Tools > Add-ons > Anki Vim Mode > Config.
 """
 
 

@@ -1,0 +1,49 @@
+# Builds the .ankiaddon package and publishes it as a GitHub release.
+#
+# To release: update "version" in manifest.json, commit, then
+#   git tag v3.0.0 && git push origin v3.0.0
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the tag matches manifest.json
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          node --check editor_vim.js
+          node tests/test_text.js
+          python3 -m py_compile __init__.py vim_core.py
+
+      - name: Build package
+        run: ./build.sh "anki_vim_mode-$GITHUB_REF_NAME.ankiaddon"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "anki_vim_mode-$GITHUB_REF_NAME.ankiaddon" \
+            --title "Anki Vim Mode ${GITHUB_REF_NAME#v}" \
+            --generate-notes

@@ -6,5 +6,7 @@
   "shift_jk_fields": true,
   "show_status": true,
   "start_in_insert": false,
-  "system_clipboard": false
+  "status_position": "bottom-left",
+  "system_clipboard": false,
+  "vim_ctrl_keys": false
 }

@@ -60,6 +60,8 @@
         system_clipboard: false,
         jk_display_lines: false,
         show_status: true,
+        status_position: "bottom-left",
+        vim_ctrl_keys: false,
     };
 
     // ======================================================================
@@ -416,6 +418,25 @@
         posMemo: new WeakMap(),
         statusEl: null,
         cursorEl: null,
+        selectEl: null,
+        marks: {},
+        jumps: [],
+        jumpIdx: 0,
+        recording: null,
+        macros: {},
+        lastMacro: null,
+        playing: 0,
+        groupDepth: 0,
+        replaceStack: [],
+        replaceTyped: "",
+        blockAnchorCol: 0,
+        lastInserted: "",
+        lastInsertPos: null,
+        lastChangePos: null,
+        lastCmd: "",
+        lastSub: null,
+        insertReg: false,
+        history: { ":": [], "/": [] },
         drawQueued: false,
     };
 
@@ -593,7 +614,12 @@
     }
 
     function isVisual() {
-        return V.mode === "visual" || V.mode === "vline";
+        return V.mode === "visual" || V.mode === "vline" || V.mode === "vblock";
+    }
+
+    // Insert and replace mode: typing goes to the field.
+    function inInsert() {
+        return V.mode === "insert" || V.mode === "replace";
     }
 
     // Bring V.model / V.pos up to date with the DOM before running a command.
@@ -627,7 +653,7 @@
         const lo = Math.min(V.vAnchor, V.pos);
         const hi = Math.max(V.vAnchor, V.pos);
 
-        if (V.mode === "vline") {
+        if (V.mode === "vline" || V.mode === "vblock") {
             return {
                 start: T.lineStart(m.text, lo),
                 end: T.lineEnd(m.text, hi),
@@ -635,7 +661,19 @@
             };
         }
 
-        return { start: lo, end: Math.min(hi + 1, m.text.length), lw: false };
+        let end = Math.min(hi + 1, m.text.length);
+
+        // v$ reaches past the last character and takes the line break too.
+        if (
+            V.desiredCol === Infinity &&
+            V.pos >= V.vAnchor &&
+            end === T.lineEnd(m.text, V.pos) &&
+            end > T.lineStart(m.text, V.pos)
+        ) {
+            end = Math.min(end + 1, m.text.length);
+        }
+
+        return { start: lo, end, lw: false };
     }
 
     // Put the DOM selection where the vim cursor / visual area is.
@@ -686,7 +724,7 @@
                 ? pos
                 : V.posMemo.get(field) || 0;
 
-        if (V.mode === "insert") {
+        if (inInsert()) {
             setSel(m, T.clamp(target, 0, m.text.length), target);
         } else {
             V.mode = "normal";
@@ -956,6 +994,21 @@
             V.regs["0"] = data;
         }
 
+        if (!name && kind === "delete") {
+            if (data.linewise || data.text.includes("\n")) {
+                // Line deletes shift through "1 .. "9, like vim.
+                for (let i = 9; i > 1; i--) {
+                    if (V.regs[String(i - 1)]) {
+                        V.regs[String(i)] = V.regs[String(i - 1)];
+                    }
+                }
+
+                V.regs["1"] = data;
+            } else {
+                V.regs["-"] = data;
+            }
+        }
+
         if (name === "+" || name === "*" || (!name && config.system_clipboard)) {
             V.lastClipWrite = data;
             V.clipboardText = data.text;
@@ -980,6 +1033,19 @@
 
         if (!name) {
             return V.regs['"'] || null;
+        }
+
+        // Read-only registers.
+        if (name === ".") {
+            return { text: V.lastInserted, linewise: false };
+        }
+
+        if (name === "/") {
+            return { text: V.lastSearch ? V.lastSearch.pattern : "", linewise: false };
+        }
+
+        if (name === ":") {
+            return { text: V.lastCmd, linewise: false };
         }
 
         return V.regs[name.toLowerCase()] || null;
@@ -1013,6 +1079,16 @@
             return false;
         }
 
+        // Inside a macro / :normal the whole run is one undo step: report
+        // whether this command changed anything but keep the change open.
+        if (V.groupDepth > 0) {
+            const now = fieldHtml(c.field);
+            const changed = now !== (c.seen === undefined ? c.before : c.seen);
+
+            c.seen = now;
+            return changed;
+        }
+
         V.change = null;
 
         const after = fieldHtml(c.field);
@@ -1023,6 +1099,7 @@
 
         c.after = after;
         c.posAfter = V.pos;
+        V.lastChangePos = { field: c.field, pos: V.pos };
         V.undo.push(c);
         V.redo.length = 0;
 
@@ -1192,7 +1269,17 @@
         "Super",
         "Compose",
     ]);
-    const NORMAL_CTRL = new Set(["<C-r>", "<C-[>"]);
+    // Ctrl keys vim mode takes in normal/visual mode. Everything else with
+    // Ctrl goes to Anki (Ctrl+B, Ctrl+Enter, Ctrl+V paste, ...) unless the
+    // user opted into the full set with the vim_ctrl_keys option.
+    const BASE_CTRL = new Set(["<C-r>", "<C-[>", "<C-q>"]);
+    const EXTRA_CTRL = new Set(
+        "<C-v> <C-a> <C-x> <C-d> <C-u> <C-f> <C-b> <C-o> <C-i>".split(" "),
+    );
+
+    function ctrlHandled(key) {
+        return BASE_CTRL.has(key) || (config.vim_ctrl_keys && EXTRA_CTRL.has(key));
+    }
     const PASS = "<pass>";
 
     function keyName(event) {
@@ -1222,33 +1309,41 @@
         return NAMED_KEYS[k] || PASS;
     }
 
-    const OPERATORS = new Set(["d", "c", "y", "gu", "gU", "g~"]);
+    const OPERATORS = new Set(
+        "d c y gu gU g~ > < gc gC".split(" "),
+    );
     const MOTIONS = new Set(
         (
             "h l j k w W b B e E ge gE 0 ^ $ g_ gg G f F t T ; , { } % | " +
             "n N * # + - _ gj gk <CR> <BS> <Left> <Right> <Up> <Down> " +
-            "<Home> <End>"
+            "<Home> <End> ( ) ` ' H M L <C-d> <C-u> <C-f> <C-b>"
         )
             .split(" ")
             .concat([" "]),
     );
-    const CHAR_ARG = new Set(["f", "F", "t", "T"]);
+    const CHAR_ARG = new Set(["f", "F", "t", "T", "`", "'"]);
+    const JUMP_MOTIONS = new Set(
+        "gg G n N * # % { } ( ) ` ' H M L".split(" "),
+    );
     const OBJECT_TYPES = new Set(
-        "w W \" ' ` ( ) b [ ] { } B < > p c".split(" "),
+        "w W \" ' ` ( ) b [ ] { } B < > p c s".split(" "),
     );
     const NORMAL_ACTIONS = new Set(
         (
             "i a I A o O x X s S D C Y p P u . v V r ~ J K gJ gv : / ? " +
-            "<C-r> <Del> <Esc> <C-[> ZZ ZQ"
+            "<C-r> <Del> <Esc> <C-[> ZZ ZQ R q @ m gi & g& zz zt zb " +
+            "<C-q> <C-v> <C-a> <C-x> <C-o> <C-i> gp gP"
         ).split(" "),
     );
     const VISUAL_ACTIONS = new Set(
         (
             "d x X D y Y c s C S R u U ~ gu gU g~ J gJ p P r o v V : " +
-            "<Del> <Esc> <C-[>"
+            "<Del> <Esc> <C-[> > < gc gC I A <C-q> <C-v>"
         ).split(" "),
     );
     const PREFIX_KEYS = new Set(["g", "Z", "z"]);
+    // Normal-mode commands followed by one more character.
+    const ARG_ACTIONS = new Set(["r", "m", "@", "q"]);
 
     const INCOMPLETE = { status: "incomplete" };
     const INVALID = { status: "invalid" };
@@ -1273,7 +1368,7 @@
                 return INCOMPLETE;
             }
 
-            if (!/^[a-zA-Z0-9+*_"-]$/.test(keys[i + 1])) {
+            if (!/^[a-zA-Z0-9+*_".:\/-]$/.test(keys[i + 1])) {
                 return INVALID;
             }
 
@@ -1381,6 +1476,22 @@
                 return INVALID;
             }
 
+            // dv{motion}: flip the motion between inclusive and exclusive.
+            if (m === "v") {
+                if (i >= keys.length) {
+                    return INCOMPLETE;
+                }
+
+                cmd.flip = true;
+                m = keys[i++];
+            }
+
+            // d/pattern<CR>: the pattern is typed in the command line.
+            if (m === "/" || m === "?") {
+                cmd.motion = m;
+                return finish();
+            }
+
             if (PREFIX_KEYS.has(m)) {
                 if (i >= keys.length) {
                     return INCOMPLETE;
@@ -1413,7 +1524,8 @@
         } else if (NORMAL_ACTIONS.has(k)) {
             cmd.action = k;
 
-            if (k === "r") {
+            // A second q stops a recording and takes no register name.
+            if (ARG_ACTIONS.has(k) && !(k === "q" && V.recording)) {
                 return readArg() || finish();
             }
 
@@ -1466,7 +1578,7 @@
             case "h":
             case "<Left>":
             case "<BS>":
-                return { pos: Math.max(ls, pos - n) };
+                return pos === ls ? null : { pos: Math.max(ls, pos - n) };
 
             case "l":
             case "<Right>":
@@ -1544,6 +1656,10 @@
 
             case "b":
             case "B": {
+                if (pos === 0) {
+                    return null;
+                }
+
                 let p = pos;
 
                 for (let i = 0; i < n; i++) {
@@ -1555,6 +1671,10 @@
 
             case "ge":
             case "gE": {
+                if (pos === 0) {
+                    return null;
+                }
+
                 let p = pos;
 
                 for (let i = 0; i < n; i++) {
@@ -1674,6 +1794,87 @@
                 return p < 0 ? null : { pos: p, inc: true };
             }
 
+            case ")":
+            case "(": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p =
+                        name === ")"
+                            ? T.sentenceForward(text, p)
+                            : T.sentenceBack(text, p);
+                }
+
+                return { pos: p };
+            }
+
+            case "`":
+            case "'": {
+                const mark = getMark(arg);
+
+                if (!mark || !mark.field || !mark.field.isConnected) {
+                    showMessage("E20: Mark not set");
+                    return null;
+                }
+
+                if (mark.field !== V.field) {
+                    // Marks can point into another field of the note.
+                    if (forOp) {
+                        return null;
+                    }
+
+                    return {
+                        pos: mark.pos,
+                        field: mark.field,
+                        line: name === "'",
+                    };
+                }
+
+                const p = T.clamp(mark.pos, 0, len);
+
+                return name === "'"
+                    ? { pos: T.firstNonBlank(text, p), lw: true }
+                    : { pos: p };
+            }
+
+            case "H":
+                return { pos: T.firstNonBlank(text, 0), lw: true };
+
+            case "L":
+                return {
+                    pos: T.firstNonBlank(text, T.lineStart(text, len)),
+                    lw: true,
+                };
+
+            case "M": {
+                const mid = Math.floor((T.lineCount(text) - 1) / 2);
+
+                return {
+                    pos: T.firstNonBlank(text, T.lineStartOf(text, mid)),
+                    lw: true,
+                };
+            }
+
+            case "<C-d>":
+            case "<C-u>":
+            case "<C-f>":
+            case "<C-b>": {
+                const step = name === "<C-d>" || name === "<C-u>" ? 8 : 16;
+                const down = name === "<C-d>" || name === "<C-f>";
+                const p = T.moveLines(
+                    text,
+                    pos,
+                    (down ? 1 : -1) * step * n,
+                    V.desiredCol,
+                );
+
+                if (p === pos) {
+                    return null;
+                }
+
+                return { pos: p, lw: true, keepCol: true };
+            }
+
             case "|":
                 return {
                     pos: Math.min(ls + n - 1, forOp ? le : T.lineLast(text, pos)),
@@ -1736,6 +1937,84 @@
         return null;
     }
 
+    function getMark(name) {
+        if (name === "`" || name === "'") {
+            return V.marks["`"] || null;
+        }
+
+        if (name === "<" || name === ">") {
+            const lv = V.lastVisual;
+
+            if (!lv) {
+                return null;
+            }
+
+            return {
+                field: lv.field || V.field,
+                pos:
+                    name === "<"
+                        ? Math.min(lv.anchor, lv.pos)
+                        : Math.max(lv.anchor, lv.pos),
+            };
+        }
+
+        if (name === ".") {
+            return V.lastChangePos;
+        }
+
+        if (name === "^") {
+            return V.lastInsertPos;
+        }
+
+        return V.marks[name] || null;
+    }
+
+    // Remember where we were before a long jump (`` returns there).
+    function setJump() {
+        if (!V.field) {
+            return;
+        }
+
+        const here = { field: V.field, pos: V.pos };
+        const last = V.jumps[V.jumpIdx - 1];
+
+        V.marks["`"] = here;
+        V.jumps.length = Math.min(V.jumps.length, V.jumpIdx);
+
+        if (!last || last.field !== here.field || last.pos !== here.pos) {
+            V.jumps.push(here);
+        }
+
+        if (V.jumps.length > 50) {
+            V.jumps.shift();
+        }
+
+        V.jumpIdx = V.jumps.length;
+    }
+
+    function jumpBy(delta) {
+        if (delta < 0 && V.jumpIdx >= V.jumps.length) {
+            // Leaving the newest position: remember it so Ctrl-i can return.
+            V.jumps.push({ field: V.field, pos: V.pos });
+        }
+
+        const idx = T.clamp(V.jumpIdx + delta, 0, V.jumps.length - 1);
+        const target = V.jumps[idx];
+
+        if (!target || !target.field || !target.field.isConnected) {
+            return;
+        }
+
+        V.jumpIdx = idx;
+
+        if (target.field !== V.field) {
+            focusField(target.field, target.pos);
+        } else {
+            V.pos = T.clampNormal(V.model.text, target.pos);
+            V.desiredCol = V.pos - T.lineStart(V.model.text, V.pos);
+        }
+    }
+
     function motionContext(m, cmd, forOp) {
         return {
             text: m.text,
@@ -1793,6 +2072,9 @@
             case "c":
                 r = T.clozeObject(text, pos, a);
                 break;
+            case "s":
+                r = T.sentenceObject(text, pos, a);
+                break;
             case "p":
                 r = T.paragraphObject(text, pos, a);
                 return r ? { start: r.start, end: r.end, lw: true } : null;
@@ -1839,8 +2121,12 @@
             return null;
         }
 
+        return motionToRange(text, pos, r, cmd.flip);
+    }
+
+    function motionToRange(text, pos, r, flip) {
         const a = Math.min(pos, r.pos);
-        const b = Math.max(pos, r.pos);
+        let b = Math.max(pos, r.pos);
 
         if (r.lw) {
             return {
@@ -1850,9 +2136,22 @@
             };
         }
 
+        const inclusive = flip ? !r.inc : !!r.inc;
+
+        // Vim's rule for an exclusive motion that ends at the start of a
+        // line: stop at the end of the previous line instead, and if it also
+        // started at/before the first non-blank, work on whole lines.
+        if (!inclusive && !flip && b > a && text[b - 1] === "\n") {
+            if (text.slice(T.lineStart(text, a), a).trim() === "") {
+                return { start: T.lineStart(text, a), end: b - 1, lw: true };
+            }
+
+            b = b - 1;
+        }
+
         return {
             start: a,
-            end: Math.min(r.inc ? b + 1 : b, text.length),
+            end: Math.min(inclusive ? b + 1 : b, text.length),
             lw: false,
         };
     }
@@ -1925,10 +2224,14 @@
             case "y": {
                 setRegister(reg, captureRange(m, range), "yank");
 
-                if (!range.lw || V.pos < range.start || V.pos > range.end) {
+                if (!range.lw || isVisual()) {
                     V.pos = range.start;
-                } else if (isVisual()) {
-                    V.pos = range.start;
+                } else if (T.lineStart(m.text, V.pos) !== range.start) {
+                    // yk / yip: up to the first yanked line, same column.
+                    V.pos = Math.min(
+                        range.start + (V.pos - T.lineStart(m.text, V.pos)),
+                        T.lineLast(m.text, range.start),
+                    );
                 }
 
                 const lines = range.lw
@@ -1983,10 +2286,73 @@
                 transformRange(range, T.toggleCase);
                 V.pos = range.start;
                 break;
+
+            case ">":
+            case "<": {
+                // Uses the editor's own indent/outdent (same as Anki's
+                // toolbar buttons): nests list items, indents paragraphs.
+                const line = T.lineIndex(m.text, range.start);
+                const last = Math.max(
+                    range.start,
+                    range.lw ? range.end : range.end - 1,
+                );
+
+                setSel(m, T.lineStart(m.text, range.start), T.lineEnd(m.text, last));
+                exec(op === ">" ? "indent" : "outdent");
+
+                const m2 = remodel();
+
+                V.pos = T.firstNonBlank(m2.text, T.lineStartOf(m2.text, line));
+                break;
+            }
+
+            case "gc":
+            case "gC": {
+                // Wrap in a cloze deletion: gc = new number, gC = same number.
+                let a = range.start;
+                let b = range.end;
+
+                while (b > a && T.isBlankChar(m.text[b - 1])) {
+                    b--;
+                }
+
+                while (a < b && T.isBlankChar(m.text[a])) {
+                    a++;
+                }
+
+                if (a >= b) {
+                    break;
+                }
+
+                const number = nextClozeNumber(op === "gc");
+
+                setSel(m, b, b);
+                typeText("}}");
+                remodel();
+                setSel(V.model, a, a);
+                typeText("{{c" + number + "::");
+                remodel();
+                V.pos = a;
+                break;
+            }
         }
 
         V.mode = "normal";
         V.pos = T.clampNormal(V.model.text, V.pos);
+    }
+
+    function nextClozeNumber(fresh) {
+        let max = 0;
+
+        for (const field of allFields()) {
+            for (const match of (field.textContent || "").matchAll(
+                /\{\{c(\d+)::/g,
+            )) {
+                max = Math.max(max, parseInt(match[1], 10));
+            }
+        }
+
+        return fresh ? max + 1 : Math.max(max, 1);
     }
 
     function insertLines(lines, htmlLines) {
@@ -2014,9 +2380,45 @@
             return;
         }
 
+        pasteData(r, before, count);
+    }
+
+    function pasteData(r, before, count) {
         const m = V.model;
         const text = m.text;
         const pos = V.pos;
+
+        if (r.block) {
+            // Blockwise: each yanked row goes onto its own line at the
+            // cursor column, adding lines / padding where the text is short.
+            const rows = r.text.split("\n");
+            const empty = T.lineEnd(text, pos) === T.lineStart(text, pos);
+            const col =
+                (before || empty ? pos : pos + 1) - T.lineStart(text, pos);
+            const first = T.lineIndex(text, pos);
+            const missing = first + rows.length - T.lineCount(text);
+
+            if (missing > 0) {
+                setSel(m, text.length, text.length);
+                typeText("\n".repeat(missing));
+                remodel();
+            }
+
+            for (let i = rows.length - 1; i >= 0; i--) {
+                const t = V.model.text;
+                const s = T.lineStartOf(t, first + i);
+                const e = T.lineEnd(t, s);
+                const pad = s + col > e ? " ".repeat(s + col - e) : "";
+                const at = Math.min(s + col, e);
+
+                setSel(V.model, at, at);
+                typeText(pad + rows[i].repeat(count));
+                remodel();
+            }
+
+            V.pos = T.lineStartOf(V.model.text, first) + col;
+            return;
+        }
 
         if (r.linewise) {
             const one = r.text.replace(/\n$/, "").split("\n");
@@ -2041,14 +2443,23 @@
                 setSel(m, ls, ls);
                 insertLines(lines, htmlLines);
                 exec("insertLineBreak");
-                V.pos = T.firstNonBlank(remodel().text, ls);
+
+                const after = remodel();
+
+                V.pasteEnd = after.caret;
+                V.pos = T.firstNonBlank(after.text, ls);
             } else {
                 const le = T.lineEnd(text, pos);
 
                 setSel(m, le, le);
                 exec("insertLineBreak");
                 insertLines(lines, htmlLines);
-                V.pos = T.firstNonBlank(remodel().text, le + 1);
+
+                const after = remodel();
+                const end = after.caret === null ? le + 1 : after.caret;
+
+                V.pasteEnd = Math.min(T.lineEnd(after.text, end) + 1, after.text.length);
+                V.pos = T.firstNonBlank(after.text, le + 1);
             }
 
             return;
@@ -2070,7 +2481,10 @@
         const m2 = remodel();
         const caret = m2.caret === null ? at + r.text.length * count : m2.caret;
 
-        V.pos = Math.max(at, caret - 1);
+        V.pasteEnd = caret;
+        // One line of text: cursor on its last character. Several lines:
+        // cursor stays at the start, like vim.
+        V.pos = r.text.includes("\n") ? at : Math.max(at, caret - 1);
     }
 
     function joinLines(count) {
@@ -2108,33 +2522,77 @@
     // Insert mode
     // ======================================================================
 
-    function enterInsert(caret) {
+    // opts: { replace, count, block } - block = { lines, col, pad } repeats
+    // the typed text on the other lines of a visual block when leaving.
+    function enterInsert(caret, opts) {
         const m = V.model || remodel();
 
         if (!m) {
             return;
         }
 
+        opts = opts || {};
         beginChange();
         caret = T.clamp(caret, 0, m.text.length);
         setSel(m, caret, caret);
-        V.mode = "insert";
-        V.insert = { text: m.text, pos: caret };
+        V.mode = opts.replace ? "replace" : "insert";
+        V.insert = {
+            text: m.text,
+            pos: caret,
+            count: opts.count || 1,
+            block: opts.block || null,
+        };
+        V.replaceStack = [];
+        V.replaceTyped = "";
+        V.insertReg = false;
         V.escapeArmed = 0;
         updateStatus();
         queueDraw();
     }
 
+    function replicateBlockInsert(block, typed) {
+        const lines = block.lines.slice().sort((x, y) => y - x);
+
+        for (const line of lines) {
+            const t = V.model.text;
+
+            if (line >= T.lineCount(t)) {
+                continue;
+            }
+
+            const s = T.lineStartOf(t, line);
+            const e = T.lineEnd(t, s);
+            let at;
+            let ins = typed;
+
+            if (block.col === Infinity) {
+                at = e;
+            } else if (s + block.col <= e) {
+                at = s + block.col;
+            } else if (block.pad) {
+                ins = " ".repeat(s + block.col - e) + typed;
+                at = e;
+            } else {
+                continue;
+            }
+
+            setSel(V.model, at, at);
+            typeText(ins);
+            remodel();
+        }
+    }
+
     function exitInsert() {
-        if (V.mode !== "insert") {
+        if (!inInsert()) {
             return;
         }
 
+        const wasReplace = V.mode === "replace";
         const field = activeField() || V.field;
 
         V.field = field;
 
-        const m = remodel();
+        let m = remodel();
         const session = V.insert;
         let inserted = "";
 
@@ -2142,9 +2600,11 @@
         V.mode = "normal";
 
         if (m) {
-            const caret = m.caret === null ? V.pos : m.caret;
+            let caret = m.caret === null ? V.pos : m.caret;
 
-            if (
+            if (wasReplace) {
+                inserted = V.replaceTyped;
+            } else if (
                 session &&
                 caret >= session.pos &&
                 m.text.length - session.text.length === caret - session.pos
@@ -2152,20 +2612,217 @@
                 inserted = m.text.slice(session.pos, caret);
             }
 
+            const simple = inserted && !inserted.includes("\n");
+
+            // 3ihello<Esc> types it three times.
+            if (!wasReplace && session && session.count > 1 && simple) {
+                typeText(inserted.repeat(session.count - 1));
+                m = remodel();
+                caret = m.caret === null ? caret : m.caret;
+            }
+
+            V.lastInsertPos = { field, pos: caret };
             V.pos = caret > T.lineStart(m.text, caret) ? caret - 1 : caret;
+
+            if (session && session.block && simple) {
+                replicateBlockInsert(session.block, inserted);
+                m = V.model;
+            }
+
+            if (session && session.block && session.block.home !== undefined) {
+                V.pos = session.block.home;
+            }
+
             V.pos = T.clampNormal(m.text, V.pos);
             V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
         }
 
+        V.lastInserted = inserted;
         endChange();
 
         if (V.pendingDot && !V.replaying) {
             V.lastChange = { keys: V.pendingDot, text: inserted };
         }
 
+        if (V.recording && !V.playing && !V.replaying) {
+            // Typed text is recorded as a whole; replace-mode keys were
+            // already recorded one by one.
+            if (!wasReplace && inserted) {
+                V.recording.items.push({ i: inserted });
+            }
+
+            V.recording.items.push({ k: "<Esc>" });
+        }
+
         V.pendingDot = null;
         placeCursor();
         updateStatus();
+    }
+
+    // Replace mode (R): typed characters overwrite; Backspace restores.
+    function replaceChar(ch) {
+        const m = remodel();
+
+        if (!m || m.caret === null) {
+            return;
+        }
+
+        const c = m.caret;
+        const t = m.text;
+        const atEnd = c >= t.length || t[c] === "\n" || t[c] === ATOM;
+
+        V.replaceStack.push(atEnd ? null : t[c]);
+        V.replaceTyped += ch;
+
+        if (atEnd) {
+            setSel(m, c, c);
+            exec("insertText", ch);
+        } else {
+            replaceRange(c, c + 1, ch);
+        }
+    }
+
+    function replaceBackspace() {
+        const m = remodel();
+
+        if (!m || m.caret === null || m.caret === 0) {
+            return;
+        }
+
+        const c = m.caret;
+
+        if (V.replaceStack.length === 0) {
+            if (m.text[c - 1] !== "\n") {
+                setSel(m, c - 1, c - 1);
+            }
+
+            return;
+        }
+
+        const original = V.replaceStack.pop();
+
+        V.replaceTyped = V.replaceTyped.slice(0, -1);
+
+        if (original === null) {
+            deleteRange(c - 1, c);
+        } else {
+            replaceRange(c - 1, c, original);
+            setSel(V.model, c - 1, c - 1);
+        }
+    }
+
+    // Returns true when the key was consumed.
+    function replaceKey(key) {
+        if (key === "<Esc>" || key === "<C-[>") {
+            exitInsert();
+            return true;
+        }
+
+        if (key.length === 1) {
+            replaceChar(key);
+            return true;
+        }
+
+        if (key === "<BS>") {
+            replaceBackspace();
+            return true;
+        }
+
+        return false;
+    }
+
+    // ======================================================================
+    // Macros
+    // ======================================================================
+
+    function recordKey(key) {
+        if (V.recording && !V.playing) {
+            V.recording.items.push({ k: key });
+        }
+    }
+
+    // Feed a key as if it was typed (macro playback, :normal).
+    function dispatchKey(key) {
+        if (V.cmdline) {
+            cmdlineKey(key);
+        } else if (V.mode === "insert") {
+            if (key === "<Esc>" || key === "<C-[>") {
+                exitInsert();
+            } else if (key === "<CR>") {
+                typeText("\n");
+            } else if (key.length === 1) {
+                typeText(key);
+            }
+        } else if (V.mode === "replace") {
+            replaceKey(key);
+        } else {
+            feedKey(key);
+        }
+    }
+
+    function tokenizeKeys(str) {
+        return (str.match(/<C-.>|<Esc>|<CR>|<BS>|<lt>|[\s\S]/g) || []).map((k) =>
+            k === "<lt>" ? "<" : k,
+        );
+    }
+
+    // Runs fn as one undo step, however many commands it executes.
+    function asOneChange(fn) {
+        beginChange();
+        V.groupDepth++;
+
+        try {
+            fn();
+        } finally {
+            V.groupDepth--;
+
+            if (V.groupDepth === 0 && !inInsert()) {
+                endChange();
+            }
+        }
+    }
+
+    function playMacro(reg, count) {
+        let items = V.macros[reg];
+
+        if (!items) {
+            // Like vim, a register filled by yanking can be executed too.
+            const r = V.regs[reg];
+
+            if (r && r.text) {
+                items = tokenizeKeys(r.text.replace(/\n$/, "")).map((k) => ({
+                    k: k === "\n" ? "<CR>" : k,
+                }));
+            }
+        }
+
+        if (!items) {
+            showMessage("E748: No previously used register");
+            return;
+        }
+
+        if (V.playing > 8) {
+            return;
+        }
+
+        V.lastMacro = reg;
+        V.playing++;
+
+        try {
+            asOneChange(() => {
+                for (let n = 0; n < count; n++) {
+                    for (const item of items.slice()) {
+                        if (item.k !== undefined) {
+                            dispatchKey(item.k);
+                        } else if (inInsert()) {
+                            typeText(item.i);
+                        }
+                    }
+                }
+            });
+        } finally {
+            V.playing--;
+        }
     }
 
     // ======================================================================
@@ -2189,6 +2846,16 @@
     }
 
     function moveCursor(r) {
+        if (r.field) {
+            focusField(r.field, r.pos);
+
+            if (r.line) {
+                V.pos = T.firstNonBlank(V.model.text, V.pos);
+            }
+
+            return;
+        }
+
         const m = V.model;
 
         V.pos = isVisual()
@@ -2221,6 +2888,12 @@
             });
         }
 
+        if (cmd.op && (cmd.motion === "/" || cmd.motion === "?")) {
+            openCmdline(cmd.motion, "");
+            V.cmdline.op = { cmd, keys };
+            return;
+        }
+
         if (cmd.op) {
             const range = operatorRange(m, cmd);
 
@@ -2248,6 +2921,10 @@
             );
 
             if (r) {
+                if (JUMP_MOTIONS.has(cmd.motion)) {
+                    setJump();
+                }
+
                 moveCursor(r);
             }
 
@@ -2264,7 +2941,7 @@
 
             case "i":
                 V.pendingDot = keys;
-                enterInsert(pos);
+                enterInsert(pos, { count });
                 return;
 
             case "a":
@@ -2273,17 +2950,126 @@
                     T.lineEnd(text, pos) > T.lineStart(text, pos)
                         ? pos + 1
                         : pos,
+                    { count },
                 );
                 return;
 
             case "I":
                 V.pendingDot = keys;
-                enterInsert(T.firstNonBlank(text, pos));
+                enterInsert(T.firstNonBlank(text, pos), { count });
                 return;
 
             case "A":
                 V.pendingDot = keys;
-                enterInsert(T.lineEnd(text, pos));
+                enterInsert(T.lineEnd(text, pos), { count });
+                return;
+
+            case "gi": {
+                const last = V.lastInsertPos;
+
+                V.pendingDot = keys;
+                enterInsert(last && last.field === V.field ? last.pos : pos);
+                return;
+            }
+
+            case "R":
+                V.pendingDot = keys;
+                enterInsert(pos, { replace: true });
+                return;
+
+            case "m":
+                if (/^[a-zA-Z]$/.test(cmd.arg)) {
+                    V.marks[cmd.arg] = { field: V.field, pos };
+                }
+
+                return;
+
+            case "q":
+                if (V.recording) {
+                    const rec = V.recording;
+                    const name = rec.reg.toLowerCase();
+
+                    V.recording = null;
+                    rec.items.pop(); // the q that stopped the recording
+                    V.macros[name] =
+                        rec.reg !== name && V.macros[name]
+                            ? V.macros[name].concat(rec.items)
+                            : rec.items;
+                } else if (/^[a-zA-Z0-9]$/.test(cmd.arg)) {
+                    V.recording = { reg: cmd.arg, items: [] };
+                }
+
+                return;
+
+            case "@": {
+                const name = cmd.arg === "@" ? V.lastMacro : cmd.arg.toLowerCase();
+
+                if (name) {
+                    playMacro(name, count);
+                }
+
+                return;
+            }
+
+            case "<C-q>":
+            case "<C-v>":
+                V.vAnchor = pos;
+                V.blockAnchorCol = pos - T.lineStart(text, pos);
+                V.desiredCol = V.blockAnchorCol;
+                V.mode = "vblock";
+                return;
+
+            case "<C-a>":
+            case "<C-x>": {
+                const num = T.numberAt(text, pos);
+
+                if (!num) {
+                    return;
+                }
+
+                const value =
+                    parseInt(text.slice(num.start, num.end), 10) +
+                    (cmd.action === "<C-a>" ? count : -count);
+
+                beginChange();
+                V.pendingDot = keys;
+                replaceRange(num.start, num.end, String(value));
+                V.pos = num.start + String(value).length - 1;
+                return;
+            }
+
+            case "<C-o>":
+                jumpBy(-count);
+                return;
+
+            case "<C-i>":
+                jumpBy(count);
+                return;
+
+            case "&":
+            case "g&": {
+                if (!V.lastSub) {
+                    showMessage("E35: No previous regular expression");
+                    return;
+                }
+
+                const all = cmd.action === "g&";
+                const line = T.lineIndex(text, pos);
+
+                substitute(
+                    m,
+                    all ? 0 : line,
+                    all ? T.lineCount(text) - 1 : line,
+                    V.lastSub,
+                    "",
+                );
+                return;
+            }
+
+            case "zz":
+            case "zt":
+            case "zb":
+                scrollCursorTo(cmd.action[1]);
                 return;
 
             case "o": {
@@ -2317,6 +3103,20 @@
                 paste(cmd.action === "P", count, cmd.reg);
                 return;
 
+            case "gp":
+            case "gP":
+                // Like p / P, but leave the cursor just after the new text.
+                beginChange();
+                V.pendingDot = keys;
+                V.pasteEnd = null;
+                paste(cmd.action === "gP", count, cmd.reg);
+
+                if (V.pasteEnd !== null) {
+                    V.pos = V.pasteEnd;
+                }
+
+                return;
+
             case "u":
                 undoRedo(true, count);
                 return;
@@ -2326,7 +3126,7 @@
                 return;
 
             case ".":
-                repeatLastChange();
+                repeatLastChange(cmd.count);
                 return;
 
             case "v":
@@ -2340,6 +3140,11 @@
                     V.vAnchor = T.clamp(V.lastVisual.anchor, 0, text.length);
                     V.pos = T.clamp(V.lastVisual.pos, 0, text.length);
                     V.mode = V.lastVisual.mode;
+
+                    if (V.mode === "vblock") {
+                        V.blockAnchorCol = V.lastVisual.anchorCol || 0;
+                        V.desiredCol = V.lastVisual.col || 0;
+                    }
                 }
 
                 return;
@@ -2448,9 +3253,19 @@
             return;
         }
 
+        if (V.mode === "vblock") {
+            executeBlock(cmd);
+            return;
+        }
+
         const range = visualBounds(m);
         const remember = () => {
-            V.lastVisual = { anchor: V.vAnchor, pos: V.pos, mode: V.mode };
+            V.lastVisual = {
+                anchor: V.vAnchor,
+                pos: V.pos,
+                mode: V.mode,
+                field: V.field,
+            };
         };
         const linewise = () => ({
             start: T.lineStart(text, range.start),
@@ -2461,12 +3276,14 @@
             remember();
 
             if (op !== "y") {
+                // Undo puts the cursor back at the start of the change.
+                V.pos = r.start;
                 beginChange();
             }
 
             applyOperator(op, r, cmd.reg);
 
-            if (V.mode !== "insert") {
+            if (!inInsert()) {
                 setModeNormal();
             }
         };
@@ -2501,6 +3318,32 @@
                 V.pos = a;
                 return;
             }
+
+            case "<C-q>":
+            case "<C-v>":
+                V.mode = "vblock";
+                V.blockAnchorCol = V.vAnchor - T.lineStart(text, V.vAnchor);
+                V.desiredCol = V.pos - T.lineStart(text, V.pos);
+                return;
+
+            case ">":
+            case "<":
+            case "gc":
+            case "gC":
+                run(cmd.action, range);
+                return;
+
+            case "I":
+                remember();
+                setModeNormal();
+                enterInsert(range.start);
+                return;
+
+            case "A":
+                remember();
+                setModeNormal();
+                enterInsert(range.end);
+                return;
 
             case "d":
             case "x":
@@ -2632,6 +3475,239 @@
         }
     }
 
+    // Rows of the visual block: for every line the [a, b) slice covered.
+    function blockInfo(m) {
+        const text = m.text;
+        const la = T.lineIndex(text, V.vAnchor);
+        const lc = T.lineIndex(text, V.pos);
+        const cursorCol =
+            V.desiredCol === Infinity
+                ? Infinity
+                : Math.max(V.desiredCol, V.pos - T.lineStart(text, V.pos));
+        const c1 = Math.min(V.blockAnchorCol, cursorCol);
+        const c2 = Math.max(V.blockAnchorCol, cursorCol);
+        const rows = [];
+
+        for (let line = Math.min(la, lc); line <= Math.max(la, lc); line++) {
+            const s = T.lineStartOf(text, line);
+            const e = T.lineEnd(text, s);
+
+            rows.push({
+                line,
+                s,
+                e,
+                a: Math.min(s + c1, e),
+                b: c2 === Infinity ? e : Math.min(s + c2 + 1, e),
+            });
+        }
+
+        return { rows, c1, c2, eol: c2 === Infinity };
+    }
+
+    function executeBlock(cmd) {
+        const m = V.model;
+        const text = m.text;
+        const info = blockInfo(m);
+        let rows = info.rows;
+        const top = rows[0];
+        const others = rows.slice(1).map((r) => r.line);
+        const remember = () => {
+            V.lastVisual = {
+                anchor: V.vAnchor,
+                pos: V.pos,
+                mode: "vblock",
+                field: V.field,
+                anchorCol: V.blockAnchorCol,
+                col: V.desiredCol,
+            };
+        };
+        // Bottom-up, so offsets of the rows above stay valid.
+        const each = (fn) => {
+            for (let i = rows.length - 1; i >= 0; i--) {
+                fn(rows[i]);
+            }
+        };
+        const capture = () => ({
+            text: rows.map((r) => text.slice(r.a, r.b)).join("\n"),
+            linewise: false,
+            block: true,
+        });
+        const leave = () => {
+            remember();
+            setModeNormal();
+            V.pos = top.a;
+        };
+        const transform = (fn) => {
+            leave();
+            beginChange();
+            each((r) => transformRange({ start: r.a, end: r.b }, fn));
+            V.pos = top.a;
+        };
+
+        switch (cmd.action) {
+            case "<Esc>":
+            case "<C-[>":
+            case "<C-q>":
+            case "<C-v>":
+                // Leaving without an action keeps the cursor where it is.
+                remember();
+                setModeNormal();
+                V.pos = T.clampNormal(text, V.pos);
+                return;
+
+            case "v":
+                V.mode = "visual";
+                return;
+
+            case "V":
+                V.mode = "vline";
+                return;
+
+            case "o": {
+                const a = V.vAnchor;
+                const col = V.blockAnchorCol;
+
+                V.vAnchor = V.pos;
+                V.blockAnchorCol =
+                    V.desiredCol === Infinity
+                        ? V.pos - T.lineStart(text, V.pos)
+                        : V.desiredCol;
+                V.pos = a;
+                V.desiredCol = col;
+                return;
+            }
+
+            case "y":
+                setRegister(cmd.reg, capture(), "yank");
+                leave();
+                V.pos = top.a;
+                return;
+
+            case "X":
+            case "D":
+            case "C":
+                rows = rows.map((r) => Object.assign({}, r, { b: r.e }));
+
+            // fallthrough: same as d / c, to the end of each line
+            case "d":
+            case "x":
+            case "<Del>":
+            case "c":
+            case "s": {
+                const change =
+                    cmd.action === "c" || cmd.action === "s" || cmd.action === "C";
+
+                setRegister(cmd.reg, capture(), "delete");
+                leave();
+                beginChange();
+                each((r) => {
+                    if (r.a < r.b) {
+                        deleteRange(r.a, r.b);
+                    }
+                });
+                V.pos = top.a;
+
+                if (change) {
+                    enterInsert(top.a, {
+                        block: { lines: others, col: top.a - top.s },
+                    });
+                }
+
+                return;
+            }
+
+            case "I":
+                leave();
+                enterInsert(top.a, {
+                    block: { lines: others, col: top.a - top.s, home: top.a },
+                });
+                return;
+
+            case "A":
+                leave();
+                enterInsert(top.b, {
+                    block: {
+                        lines: others,
+                        col: info.eol ? Infinity : info.c2 + 1,
+                        pad: true,
+                        home: top.a,
+                    },
+                });
+                return;
+
+            case "r":
+                transform((str) => cmd.arg.repeat(str.length));
+                return;
+
+            case "~":
+            case "g~":
+                transform(T.toggleCase);
+                return;
+
+            case "u":
+            case "gu":
+                transform((str) => str.toLowerCase());
+                return;
+
+            case "U":
+            case "gU":
+                transform((str) => str.toUpperCase());
+                return;
+
+            case "J":
+            case "gJ":
+                leave();
+                beginChange();
+                V.pos = top.s;
+                joinLines(Math.max(2, rows.length));
+                return;
+
+            case ">":
+            case "<":
+                leave();
+                beginChange();
+                applyOperator(
+                    cmd.action,
+                    { start: top.s, end: rows[rows.length - 1].e, lw: true },
+                    null,
+                );
+                return;
+
+            case ":":
+                remember();
+                openCmdline(":", "'<,'>");
+                return;
+        }
+    }
+
+    function scrollCursorTo(where) {
+        const field = V.field;
+        const m = V.model;
+
+        if (!field || !m) {
+            return;
+        }
+
+        const rect = cursorRect(m, T.clamp(V.pos, 0, m.text.length));
+        const scroller = scrollParent(field);
+        const view = scroller
+            ? scroller.getBoundingClientRect()
+            : { top: 0, bottom: window.innerHeight };
+        const target =
+            where === "t"
+                ? view.top + 8
+                : where === "b"
+                  ? view.bottom - rect.height - 8
+                  : (view.top + view.bottom - rect.height) / 2;
+        const delta = rect.top - target;
+
+        if (scroller) {
+            scroller.scrollTop += delta;
+        } else {
+            window.scrollBy(0, delta);
+        }
+    }
+
     function execute(cmd, keys) {
         const m = sync();
 
@@ -2649,7 +3725,7 @@
             executeNormal(cmd, keys);
         }
 
-        if (V.mode !== "insert") {
+        if (!inInsert()) {
             if (V.model) {
                 V.pos = isVisual()
                     ? T.clamp(V.pos, 0, V.model.text.length)
@@ -2673,11 +3749,34 @@
         updateStatus();
     }
 
-    function repeatLastChange() {
-        const last = V.lastChange;
+    function repeatLastChange(count) {
+        let last = V.lastChange;
 
         if (!last || V.replaying) {
             return;
+        }
+
+        if (count) {
+            // "3." repeats with a new count replacing the original one.
+            const keys = last.keys.slice();
+            let i = 0;
+
+            while (keys[i] === '"') {
+                i += 2;
+            }
+
+            let j = i;
+
+            while (
+                j < keys.length &&
+                /^[0-9]$/.test(keys[j]) &&
+                !(j === i && keys[j] === "0")
+            ) {
+                j++;
+            }
+
+            keys.splice(i, j - i, ...String(count).split(""));
+            last = V.lastChange = { keys, text: last.text };
         }
 
         V.replaying = true;
@@ -2686,10 +3785,16 @@
             beginChange();
 
             for (const key of last.keys) {
-                feedKey(key);
+                dispatchKey(key);
             }
 
-            if (V.mode === "insert") {
+            if (V.mode === "replace") {
+                for (const ch of last.text) {
+                    replaceChar(ch);
+                }
+
+                exitInsert();
+            } else if (V.mode === "insert") {
                 if (last.text) {
                     typeText(last.text);
                 }
@@ -2735,7 +3840,7 @@
     // ======================================================================
 
     function openCmdline(type, text) {
-        V.cmdline = { type, text };
+        V.cmdline = { type, text, hist: -1, typed: text };
         updateStatus();
         queueDraw();
     }
@@ -2743,7 +3848,7 @@
     function closeCmdline() {
         V.cmdline = null;
 
-        if (V.field) {
+        if (V.field && !inInsert()) {
             remodel();
             placeCursor();
         }
@@ -2760,9 +3865,36 @@
             }
 
             closeCmdline();
+        } else if (key === "<Up>" || key === "<Down>") {
+            // Walk the history of earlier commands / searches.
+            const list = V.history[c.type === "?" ? "/" : c.type];
+            const next = c.hist + (key === "<Up>" ? 1 : -1);
+
+            if (next >= -1 && next < list.length) {
+                if (c.hist === -1) {
+                    c.typed = c.text;
+                }
+
+                c.hist = next;
+                c.text = next === -1 ? c.typed : list[list.length - 1 - next];
+                updateStatus();
+            }
+        } else if (key === "<C-w>") {
+            c.text = c.text.replace(/\S+\s*$/, "");
+            updateStatus();
         } else if (key === "<CR>") {
+            const list = V.history[c.type === "?" ? "/" : c.type];
+
+            if (c.text && list[list.length - 1] !== c.text) {
+                list.push(c.text);
+
+                if (list.length > 50) {
+                    list.shift();
+                }
+            }
+
             V.cmdline = null;
-            runCmdline(c.type, c.text);
+            runCmdline(c.type, c.text, c.op);
 
             if (!V.cmdline) {
                 closeCmdline();
@@ -2852,7 +3984,9 @@
         return { l1: a.line, l2: a.line, rest, given: true };
     }
 
-    function substitute(m, l1, l2, spec) {
+    function substitute(m, l1, l2, spec, extraFlags) {
+        V.lastSub = spec;
+
         const delim = spec[0];
         const parts = [];
         let cur = "";
@@ -2872,7 +4006,7 @@
         parts.push(cur);
 
         const pattern = parts[0] || (V.lastSearch ? V.lastSearch.pattern : "");
-        const flags = parts.length > 2 ? parts[2] : "";
+        const flags = (parts.length > 2 ? parts[2] : "") + (extraFlags || "");
 
         if (!pattern) {
             showMessage("E35: No previous regular expression");
@@ -2929,13 +4063,21 @@
             return;
         }
 
+        // Line of the last match, counted before the text shifts.
+        const lastLine =
+            T.lineIndex(text, edits[edits.length - 1].a) +
+            (edits[edits.length - 1].text.split("\n").length - 1);
+
         beginChange();
 
         for (let i = edits.length - 1; i >= 0; i--) {
             replaceRange(edits[i].a, edits[i].b, edits[i].text);
         }
 
-        V.pos = T.firstNonBlank(V.model.text, edits[edits.length - 1].a);
+        V.pos = T.firstNonBlank(
+            V.model.text,
+            T.lineStartOf(V.model.text, lastLine),
+        );
         endChange();
         showMessage(
             edits.length +
@@ -2944,7 +4086,7 @@
         );
     }
 
-    function runCmdline(type, input) {
+    function runCmdline(type, input, pendingOp) {
         const m = sync();
 
         if (!m) {
@@ -2966,7 +4108,34 @@
 
             if (p < 0) {
                 showMessage("E486: Pattern not found: " + pattern);
+            } else if (pendingOp) {
+                // d/pattern: operate from the cursor up to the match.
+                const range = motionToRange(m.text, V.pos, { pos: p }, false);
+                const op = pendingOp.cmd.op;
+
+                if (op !== "y") {
+                    beginChange();
+                }
+
+                applyOperator(op, range, pendingOp.cmd.reg);
+
+                if (!inInsert()) {
+                    if (endChange() && !V.replaying) {
+                        V.lastChange = {
+                            keys: pendingOp.keys.concat(
+                                tokenizeKeys(input),
+                                ["<CR>"],
+                            ),
+                            text: "",
+                        };
+                    }
+                } else {
+                    V.pendingDot = pendingOp.keys.concat(tokenizeKeys(input), [
+                        "<CR>",
+                    ]);
+                }
             } else {
+                setJump();
                 V.pos = T.clampNormal(m.text, p);
                 V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
             }
@@ -2974,17 +4143,21 @@
             return;
         }
 
+        V.lastCmd = input;
+
         const wasVisual = isVisual();
-        const range = parseLineRange(input.trim(), m);
-        const rest = range.rest.trim();
+        const range = parseLineRange(input.replace(/^\s+/, ""), m);
+        // Leading blanks only: ":normal A " must keep its trailing space.
+        const rest = range.rest.replace(/^\s+/, "");
 
         if (wasVisual) {
             setModeNormal();
             V.pos = T.clampNormal(m.text, V.pos);
         }
 
-        if (rest === "") {
+        if (rest.trim() === "") {
             if (range.given) {
+                setJump();
                 V.pos = T.firstNonBlank(m.text, T.lineStartOf(m.text, range.l2));
             }
 
@@ -3006,11 +4179,150 @@
             lw: true,
         });
 
+        const args = match ? match[3] : "";
+
         switch (name) {
             case "w":
             case "write":
                 sendPython({ cmd: "w" });
                 return;
+
+            case "t":
+            case "co":
+            case "copy":
+            case "m":
+            case "move": {
+                // :t / :m {line} - copy or move the range below that line.
+                const total = T.lineCount(m.text);
+                const a = args.trim();
+                let dest;
+
+                if (a === "$") {
+                    dest = total - 1;
+                } else if (a === "." || a === "") {
+                    dest = T.lineIndex(m.text, V.pos);
+                } else if (/^\d+$/.test(a)) {
+                    dest = Math.min(parseInt(a, 10), total) - 1;
+                } else {
+                    showMessage("E14: Invalid address");
+                    return;
+                }
+
+                const move = name[0] === "m";
+                const n = range.l2 - range.l1 + 1;
+
+                if (move && dest >= range.l1 - 1 && dest <= range.l2) {
+                    return;
+                }
+
+                const data = captureRange(m, lineRange());
+
+                beginChange();
+
+                if (dest < 0) {
+                    V.pos = 0;
+                    pasteData(data, true, 1);
+                } else {
+                    V.pos = T.lineStartOf(V.model.text, dest);
+                    pasteData(data, false, 1);
+                }
+
+                let first = dest + 1;
+
+                if (move) {
+                    const shift = dest < range.l1 ? n : 0;
+                    const t = V.model.text;
+
+                    deleteLines({
+                        start: T.lineStartOf(t, range.l1 + shift),
+                        end: T.lineEnd(t, T.lineStartOf(t, range.l2 + shift)),
+                        lw: true,
+                    });
+
+                    if (dest >= range.l1) {
+                        first -= n;
+                    }
+                }
+
+                V.pos = T.firstNonBlank(
+                    V.model.text,
+                    T.lineStartOf(V.model.text, first + n - 1),
+                );
+                endChange();
+                return;
+            }
+
+            case "norm":
+            case "normal": {
+                // :[range]normal {keys} - run normal-mode keys on each line.
+                const keys = tokenizeKeys(args);
+
+                if (keys.length === 0) {
+                    return;
+                }
+
+                V.playing++;
+
+                try {
+                    asOneChange(() => {
+                        for (let line = range.l1; line <= range.l2; line++) {
+                            if (line >= T.lineCount(V.model.text)) {
+                                break;
+                            }
+
+                            V.pos = T.lineStartOf(V.model.text, line);
+                            placeCursor();
+
+                            for (const key of keys) {
+                                dispatchKey(key);
+                            }
+
+                            if (inInsert()) {
+                                exitInsert();
+                            }
+
+                            if (isVisual()) {
+                                setModeNormal();
+                            }
+
+                            remodel();
+                        }
+                    });
+                } finally {
+                    V.playing--;
+                }
+
+                return;
+            }
+
+            case "marks": {
+                const names = Object.keys(V.marks)
+                    .filter((k) => k !== "`")
+                    .sort();
+
+                showMessage(
+                    names.length
+                        ? "marks: " +
+                              names
+                                  .map((k) => {
+                                      const mk = V.marks[k];
+                                      const t =
+                                          mk.field === V.field ? m.text : "";
+
+                                      return (
+                                          k +
+                                          (t
+                                              ? " line " +
+                                                (T.lineIndex(t, mk.pos) + 1)
+                                              : " (other field)")
+                                      );
+                                  })
+                                  .join("   ")
+                        : "No marks set",
+                    6000,
+                );
+                return;
+            }
 
             case "wq":
             case "x":
@@ -3032,9 +4344,13 @@
                 return;
 
             case "y":
-            case "yank":
+            case "yank": {
+                const keep = V.pos;
+
                 applyOperator("y", lineRange(), null);
+                V.pos = keep;
                 return;
+            }
 
             case "noh":
             case "nohlsearch":
@@ -3088,12 +4404,16 @@
     // Status line and block cursor
     // ======================================================================
 
-    const MODE_LABELS = {
-        normal: "NORMAL",
-        insert: "INSERT",
-        visual: "VISUAL",
-        vline: "V-LINE",
+    // Letter shown in the round badge, and the colour group it uses.
+    const MODE_BADGES = {
+        normal: ["N", "normal"],
+        insert: ["I", "insert"],
+        replace: ["R", "replace"],
+        visual: ["V", "visual"],
+        vline: ["V", "visual"],
+        vblock: ["V", "visual"],
     };
+    const MODE_NOTES = { vline: "LINE", vblock: "BLOCK" };
 
     function showMessage(text, ms) {
         V.message = text;
@@ -3110,7 +4430,9 @@
             return;
         }
 
-        document.body.dataset.ankiVimMode = V.mode;
+        const badge = MODE_BADGES[V.mode] || MODE_BADGES.normal;
+
+        document.body.dataset.ankiVimMode = badge[1];
 
         let el = V.statusEl;
 
@@ -3126,20 +4448,50 @@
             V.statusEl = el;
         }
 
-        el.style.display = config.show_status ? "" : "none";
-        el.classList.toggle("anki-vim-cmdline", !!V.cmdline);
-        el.classList.toggle("anki-vim-message", !V.cmdline && !!V.message);
+        if (el.childNodes.length !== 2) {
+            el.textContent = "";
+
+            for (const cls of ["anki-vim-badge", "anki-vim-info"]) {
+                const span = document.createElement("span");
+
+                span.className = cls;
+                el.appendChild(span);
+            }
+        }
+
+        let info = "";
+        let kind = "";
 
         if (V.cmdline) {
-            el.textContent = V.cmdline.type + V.cmdline.text + "█";
+            info = V.cmdline.type + V.cmdline.text + "\u2588";
+            kind = "cmdline";
         } else if (V.message) {
-            el.textContent = V.message;
+            info = V.message;
+            kind = "message";
         } else {
-            const pending = V.keys.join("");
+            const parts = [];
 
-            el.textContent =
-                MODE_LABELS[V.mode] + (pending ? "  " + pending : "");
+            if (MODE_NOTES[V.mode]) {
+                parts.push(MODE_NOTES[V.mode]);
+            }
+
+            if (V.recording) {
+                parts.push("recording @" + V.recording.reg);
+            }
+
+            if (V.keys.length > 0) {
+                parts.push(V.keys.join(""));
+            }
+
+            info = parts.join("  ");
         }
+
+        el.style.display = config.show_status ? "" : "none";
+        el.dataset.position = config.status_position;
+        el.dataset.kind = kind;
+        el.firstChild.textContent = badge[0];
+        el.lastChild.textContent = info;
+        el.lastChild.style.display = info ? "" : "none";
     }
 
     function cursorRect(m, pos) {
@@ -3267,7 +4619,66 @@
         return false;
     }
 
+    // Visual block has no native equivalent (a browser selection is one
+    // continuous range), so its rectangles are drawn as an overlay.
+    function drawBlockSelection() {
+        let box = V.selectEl;
+
+        if (!box || !box.isConnected) {
+            box = document.getElementById("anki-vim-block-select");
+
+            if (!box) {
+                box = document.createElement("div");
+                box.id = "anki-vim-block-select";
+                document.body.appendChild(box);
+            }
+
+            V.selectEl = box;
+        }
+
+        box.textContent = "";
+
+        const m = V.model;
+
+        if (V.mode !== "vblock" || V.cmdline || !m || activeField() !== m.root) {
+            return;
+        }
+
+        for (const row of blockInfo(m).rows) {
+            if (row.a >= row.b) {
+                continue;
+            }
+
+            const pa = domPos(m, row.a, true);
+            const pb = domPos(m, row.b);
+            const range = document.createRange();
+
+            try {
+                range.setStart(pa.n, pa.o);
+                range.setEnd(pb.n, pb.o);
+            } catch (error) {
+                continue;
+            }
+
+            for (const rect of range.getClientRects()) {
+                if (rect.width <= 0 || rect.height <= 0) {
+                    continue;
+                }
+
+                const div = document.createElement("div");
+
+                div.style.left = rect.left + "px";
+                div.style.top = rect.top + "px";
+                div.style.width = rect.width + "px";
+                div.style.height = rect.height + "px";
+                box.appendChild(div);
+            }
+        }
+    }
+
     function drawCursor(allowScroll) {
+        drawBlockSelection();
+
         let el = V.cursorEl;
 
         if (!el || !el.isConnected) {
@@ -3286,7 +4697,7 @@
         const m = V.model;
 
         if (
-            V.mode === "insert" ||
+            inInsert() ||
             V.cmdline ||
             !field ||
             !m ||
@@ -3421,6 +4832,49 @@
             return;
         }
 
+        // Ctrl-r {register}: insert a register's text.
+        if (V.insertReg) {
+            V.insertReg = false;
+
+            if (key.length === 1) {
+                swallow(event);
+
+                const r = getRegister(key === '"' ? null : key);
+
+                if (r && r.text) {
+                    typeText(r.linewise ? r.text.replace(/\n$/, "") : r.text);
+                }
+
+                return;
+            }
+        }
+
+        if (config.vim_ctrl_keys && key.startsWith("<C-")) {
+            const m = remodel();
+            const c = m ? m.caret : null;
+
+            if (key === "<C-r>") {
+                swallow(event);
+                V.insertReg = true;
+                return;
+            }
+
+            if (c !== null && (key === "<C-w>" || key === "<C-u>" || key === "<C-h>")) {
+                const ls = T.lineStart(m.text, c);
+                let from = Math.max(0, c - 1);
+
+                if (key === "<C-u>" && c > ls) {
+                    from = ls;
+                } else if (key === "<C-w>" && c > ls) {
+                    from = Math.max(ls, T.wordBack(m.text, c));
+                }
+
+                swallow(event);
+                deleteRange(from, c);
+                return;
+            }
+        }
+
         const seq = config.insert_escape;
 
         if (seq && seq.length === 2) {
@@ -3465,17 +4919,35 @@
         if (V.cmdline) {
             if (key !== PASS) {
                 swallow(event);
+                recordKey(key);
                 cmdlineKey(key);
             }
 
             return;
         }
 
-        if (V.mode === "insert") {
-            if (resolveField(false)) {
-                insertKey(event, key);
+        if (inInsert()) {
+            if (!resolveField(false)) {
+                return;
             }
 
+            if (V.mode === "replace") {
+                const isEsc = key === "<Esc>" || key === "<C-[>";
+
+                if (isEsc || key.length === 1 || key === "<BS>") {
+                    swallow(event);
+
+                    if (!isEsc) {
+                        recordKey(key);
+                    }
+
+                    replaceKey(key);
+                }
+
+                return;
+            }
+
+            insertKey(event, key);
             return;
         }
 
@@ -3483,7 +4955,7 @@
             return;
         }
 
-        if (key.startsWith("<C-") && !NORMAL_CTRL.has(key)) {
+        if (key.startsWith("<C-") && !ctrlHandled(key)) {
             return;
         }
 
@@ -3492,6 +4964,7 @@
         }
 
         swallow(event);
+        recordKey(key);
         feedKey(key);
     }
 
@@ -3527,19 +5000,20 @@
             return;
         }
 
-        if (V.mode === "insert") {
+        if (inInsert()) {
             exitInsert();
             return;
         }
 
         resolveField(false);
+        recordKey("<Esc>");
         feedKey("<Esc>");
     }
 
     let selectionTimer = 0;
 
     function onSelectionChange() {
-        if (V.mode === "insert" || V.cmdline) {
+        if (inInsert() || V.cmdline) {
             return;
         }
 
@@ -3547,7 +5021,7 @@
         selectionTimer = setTimeout(() => {
             const field = activeField();
 
-            if (!field || V.mode === "insert" || V.cmdline) {
+            if (!field || inInsert() || V.cmdline) {
                 drawCursor(false);
                 return;
             }
@@ -3576,7 +5050,7 @@
         setTimeout(() => {
             const field = activeField();
 
-            if (!field || V.mode === "insert" || V.cmdline) {
+            if (!field || inInsert() || V.cmdline) {
                 return;
             }
 
@@ -3616,7 +5090,7 @@
                 V.field = field;
                 V.lastField = field;
 
-                if (V.mode !== "insert" && !isVisual()) {
+                if (!inInsert() && !isVisual()) {
                     sync();
                     placeCursor();
                 }
@@ -3635,7 +5109,7 @@
         requestAnimationFrame(() => {
             V.drawQueued = false;
 
-            if (V.mode !== "insert" && V.field && activeField() === V.field) {
+            if (!inInsert() && V.field && activeField() === V.field) {
                 remodel();
             }
 
@@ -3698,13 +5172,13 @@
         },
         setMode: function (mode) {
             if (mode === "normal") {
-                if (V.mode === "insert") {
+                if (inInsert()) {
                     exitInsert();
                 } else {
                     setModeNormal();
                     updateStatus();
                 }
-            } else if (mode === "insert" && V.mode !== "insert") {
+            } else if (mode === "insert" && !inInsert()) {
                 if (resolveField(true) && sync()) {
                     enterInsert(V.pos);
                 }
@@ -3713,7 +5187,17 @@
         message: showMessage,
         // Introspection used by the test-suite.
         _state: V,
-        _internals: { buildModel, domPos, parse, remodel, sync, placeCursor, focusField, config },
+        _internals: {
+            buildModel,
+            domPos,
+            parse,
+            remodel,
+            sync,
+            placeCursor,
+            focusField,
+            config,
+            blockInfo,
+        },
     };
 
     if (document.readyState === "loading") {

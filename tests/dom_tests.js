@@ -33,6 +33,19 @@
         V.clipboardText = "";
         V.lastClipWrite = null;
         V.stamp = null;
+        V.message = "";
+        V.marks = {};
+        V.jumps = [];
+        V.jumpIdx = 0;
+        V.recording = null;
+        V.macros = {};
+        V.lastMacro = null;
+        V.playing = 0;
+        V.groupDepth = 0;
+        V.lastSub = null;
+        V.lastInsertPos = null;
+        V.history = { ":": [], "/": [] };
+        I.config.vim_ctrl_keys = false;
         window.__cmds.length = 0;
         I.config.shift_jk_fields = true;
         I.config.insert_escape = "";
@@ -151,6 +164,26 @@
         results.push({ name, ok: errors.length === 0, errors });
     }
 
+    // ---- comparison mode ---------------------------------------------------
+    // tests/compare_with_vim.py sets window.__vimCases; run those key
+    // sequences and report the resulting state instead of the test-suite.
+
+    if (window.__vimCases) {
+        return JSON.stringify(
+            window.__vimCases.map((c) => {
+                try {
+                    setup(c.html, 0);
+                    I.config.shift_jk_fields = false;
+                    I.config.vim_ctrl_keys = true;
+                    feed(c.keys);
+                    return { text: text(), pos: V.pos, mode: V.mode };
+                } catch (error) {
+                    return { error: String(error && error.stack ? error.stack : error) };
+                }
+            }),
+        );
+    }
+
     // ---- model -----------------------------------------------------------
 
     function modelText(h) {
@@ -214,7 +247,8 @@
 
     test("review: unmapped keys are never typed in normal mode", () => {
         setup("hello world");
-        feed("qQzZmM&@!'`=RTH LU");
+        feed("Q!=U_Q#");
+        feed("zqgQ\\|");
         feed("<Esc>");
         expect("hello world", null);
         eq(html(), "hello world", "html untouched");
@@ -1068,6 +1102,349 @@
         eq(text(), "a ￼ b\na ￼ b");
         feed("u");
         eq(text(), "a ￼ b");
+    });
+
+    // ---- replace mode ----------------------------------------------------
+
+    test("R overwrites, appends past the end, Esc leaves", () => {
+        setup("abcdef", 1);
+        feed("RXY<Esc>");
+        expect("aXYdef", 2);
+        eq(V.mode, "normal");
+        setup("ab<br>cd", 1);
+        feed("RXYZ<Esc>");
+        expect("aXYZ\ncd", 3, "normal");
+    });
+
+    test("R backspace restores the original text", () => {
+        setup("abcdef", 1);
+        feed("RXYZ<BS><BS>");
+        eq(V.mode, "replace");
+        feed("<Esc>");
+        expect("aXcdef", 1);
+        feed("u");
+        expect("abcdef");
+    });
+
+    test("R is repeatable and undoable as one change", () => {
+        setup("aaaa<br>bbbb", 0);
+        feed("Rxy<Esc>j0.");
+        expect("xyaa\nxybb");
+        feed("u");
+        expect("xyaa\nbbbb");
+    });
+
+    // ---- marks and jumps ---------------------------------------------------
+
+    test("marks: m ` '", () => {
+        setup("one<br>  two<br>three", 6);
+        feed("maggmb");
+        feed("`a");
+        eq(V.pos, 6);
+        feed("gg'a");
+        eq(V.pos, 6, "' goes to first non-blank of the line");
+        feed("ggd'a");
+        expect("three", 0);
+    });
+
+    test("`` returns to the position before a jump", () => {
+        setup("a<br>b<br>c<br>target", 2);
+        feed("G");
+        eq(V.pos, 6);
+        feed("``");
+        eq(V.pos, 2);
+        feed("/target<CR>");
+        eq(V.pos, 6);
+        feed("''");
+        eq(V.pos, 2);
+    });
+
+    test("marks reach into other fields", () => {
+        setup("first field", 3);
+        field(1).innerHTML = "second";
+        feed("maJ");
+        eq(V.field === field(1), true);
+        feed("`a");
+        eq(V.field === field(0), true, "jumped back to field 1");
+        eq(V.pos, 3);
+    });
+
+    // ---- macros ------------------------------------------------------------
+
+    test("macro: record and replay", () => {
+        setup("a<br>b<br>c<br>d", 0);
+        feed("qqA!<Esc>jq");
+        expect("a!\nb\nc\nd", 3);
+        feed("@q");
+        expect("a!\nb!\nc\nd");
+        feed("2@@");
+        expect("a!\nb!\nc!\nd!");
+    });
+
+    test("macro replay is one undo step", () => {
+        setup("x y z", 0);
+        feed("qaxwq");
+        expect(" y z");
+        feed("0@a");
+        feed("u");
+        expect(" y z");
+    });
+
+    test("macro with operators and search", () => {
+        setup("k1=v1<br>k2=v2<br>k3=v3", 0);
+        feed("qwf=Dj0q@w@w");
+        expect("k1\nk2\nk3");
+    });
+
+    test("status shows recording", () => {
+        setup("abc", 0);
+        feed("qz");
+        eq(document.querySelector("#anki-vim-status .anki-vim-info").textContent, "recording @z");
+        feed("q");
+        eq(V.recording, null);
+    });
+
+    // ---- visual block ------------------------------------------------------
+
+    test("block delete and yank/paste", () => {
+        setup("abcd<br>efgh<br>ijkl", 1);
+        feed("<C-q>jld");
+        expect("ad\neh\nijkl", 1);
+        feed("u");
+        expect("abcd\nefgh\nijkl");
+        feed("0l<C-q>jjy$p");
+        expect("abcdb\nefghf\nijklj");
+    });
+
+    test("block insert and append", () => {
+        setup("abc<br>def<br>ghi", 1);
+        feed("<C-q>jjI- <Esc>");
+        expect("a- bc\nd- ef\ng- hi");
+        feed("u");
+        expect("abc\ndef\nghi");
+        feed("<C-q>jj$A;<Esc>");
+        expect("abc;\ndef;\nghi;");
+    });
+
+    test("block change, replace and case", () => {
+        setup("abcd<br>efgh", 1);
+        feed("<C-q>jlcXY<Esc>");
+        expect("aXYd\neXYh");
+        setup("abcd<br>efgh", 1);
+        feed("<C-q>jlr-");
+        expect("a--d\ne--h");
+        setup("abcd<br>efgh", 1);
+        feed("<C-q>jlU");
+        expect("aBCd\neFGh");
+    });
+
+    test("block with short lines", () => {
+        setup("abcdef<br>ab<br>abcdef", 3);
+        feed("<C-q>jjld");
+        expect("abcf\nab\nabcf");
+    });
+
+    test("block draws one rectangle per row", () => {
+        setup("abcd<br>efgh<br>ijkl", 1);
+        feed("<C-q>jjl");
+        eq(document.querySelectorAll("#anki-vim-block-select > div").length, 3);
+        feed("<Esc>");
+        eq(document.querySelectorAll("#anki-vim-block-select > div").length, 0);
+    });
+
+    // ---- more commands -----------------------------------------------------
+
+    test("count on insert: 3ix", () => {
+        setup("", 0);
+        feed("3iab<Esc>");
+        expect("ababab", 5);
+        feed("u");
+        expect("");
+        setup("x", 0);
+        feed("2A!<Esc>");
+        expect("x!!");
+    });
+
+    test("gi returns to the last insert position", () => {
+        setup("one two", 0);
+        feed("ea!<Esc>0giX<Esc>");
+        expect("one!X two");
+    });
+
+    test("numbered and small-delete registers", () => {
+        setup("l1<br>l2<br>l3<br>word here", 0);
+        feed("dddd");
+        feed('"1p');
+        feed('"2p');
+        expect("l3\nl2\nl1\nword here");
+        feed("Gdw");
+        feed('"-P');
+        expect("l3\nl2\nl1\nword here");
+    });
+
+    test("sentence motions and objects", () => {
+        setup("One two. Three four. Five", 0);
+        feed(")");
+        eq(V.pos, 9);
+        feed(")");
+        eq(V.pos, 21);
+        feed("(");
+        eq(V.pos, 9);
+        feed("das");
+        expect("One two. Five");
+        feed("cisNew<Esc>");
+        expect("One two. New");
+    });
+
+    test("H M L", () => {
+        setup("a<br>b<br>c<br>d<br>e", 4);
+        feed("H");
+        eq(V.pos, 0);
+        feed("L");
+        eq(V.pos, 8);
+        feed("M");
+        eq(V.pos, 4);
+    });
+
+    test("cloze operators gc gC", () => {
+        setup("Paris is the capital of France", 0);
+        feed("gciw");
+        expect("{{c1::Paris}} is the capital of France", 0);
+        feed("$gciw");
+        expect("{{c1::Paris}} is the capital of {{c2::France}}");
+        feed("/capital<CR>vegC");
+        expect("{{c1::Paris}} is the {{c2::capital}} of {{c2::France}}");
+        feed("u");
+        expect("{{c1::Paris}} is the capital of {{c2::France}}");
+    });
+
+    test("cloze keeps formatting inside", () => {
+        setup("the <b>bold</b> word", 4);
+        feed("gciw");
+        eq(text(), "the {{c1::bold}} word");
+        eq(field().querySelector("b") !== null, true, "bold kept");
+    });
+
+    test("indent and outdent", () => {
+        setup("<ul><li>one</li><li>two</li></ul>", 4);
+        feed(">>");
+        eq(field().querySelectorAll("ul ul li").length, 1, "nested list item");
+        expect("one\ntwo", 4);
+        feed("<lt><lt>");
+        eq(field().querySelectorAll("ul ul li").length, 0, "outdented");
+    });
+
+    test("& repeats the last substitution", () => {
+        setup("a a<br>a a", 0);
+        feed(":s/a/b/<CR>j&");
+        expect("b a\nb a");
+        feed("g&");
+        expect("b b\nb b");
+    });
+
+    test(":t and :m copy and move lines", () => {
+        setup("a<br>b<br>c", 0);
+        feed(":t$<CR>");
+        expect("a\nb\nc\na", 6);
+        feed(":1m2<CR>");
+        expect("b\na\nc\na");
+        feed(":3,4m0<CR>");
+        expect("c\na\nb\na");
+        feed("u");
+        expect("b\na\nc\na");
+    });
+
+    test(":normal runs keys on each line as one change", () => {
+        setup("a<br>b<br>c", 0);
+        feed(":%normal Ax<CR>");
+        expect("ax\nbx\ncx");
+        feed("u");
+        expect("a\nb\nc");
+        feed(":2,3norm I- <CR>");
+        expect("a\n- b\n- c");
+    });
+
+    test("command-line history", () => {
+        setup("abc", 0);
+        feed("/b<CR>");
+        feed("/c<CR>");
+        feed("/<Up><Up>");
+        eq(V.cmdline.text, "b");
+        feed("<Down>");
+        eq(V.cmdline.text, "c");
+        feed("<Esc>");
+    });
+
+    test("vim_ctrl_keys: off by default, on when enabled", () => {
+        setup("x 9 y", 0);
+
+        const press = (key) => {
+            const ev = new KeyboardEvent("keydown", {
+                key,
+                ctrlKey: true,
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+            });
+
+            document.activeElement.dispatchEvent(ev);
+            return ev.defaultPrevented;
+        };
+
+        eq(press("a"), false, "Ctrl+A left to Anki");
+        eq(press("v"), false, "Ctrl+V left to Anki");
+        I.config.vim_ctrl_keys = true;
+        eq(press("a"), true, "Ctrl-a taken");
+        expect("x 10 y", 3);
+        feed("5<C-x>");
+        expect("x 5 y", 2);
+        feed("<C-v>l");
+        eq(V.mode, "vblock");
+        feed("<Esc>A foo bar");
+        feed("<C-w>");
+        eq(text(), "x 5 y foo ");
+        feed("<C-u>");
+        eq(text(), "");
+        feed("<Esc>");
+    });
+
+    test("insert Ctrl-r pastes a register (vim_ctrl_keys)", () => {
+        setup("word", 0);
+        I.config.vim_ctrl_keys = true;
+        feed('yiwA <C-r>"<Esc>');
+        expect("word word");
+    });
+
+    test("jump list Ctrl-o / Ctrl-i (vim_ctrl_keys)", () => {
+        setup("a<br>b<br>c<br>d", 0);
+        I.config.vim_ctrl_keys = true;
+        feed("G");
+        feed("gg");
+        feed("<C-o>");
+        eq(V.pos, 6);
+        feed("<C-o>");
+        eq(V.pos, 0);
+        feed("<C-i>");
+        eq(V.pos, 6);
+    });
+
+    test("status badge shows the mode letter", () => {
+        setup("abc", 0);
+
+        const badge = () =>
+            document.querySelector("#anki-vim-status .anki-vim-badge").textContent +
+            ":" +
+            document.body.dataset.ankiVimMode;
+
+        eq(badge(), "N:normal");
+        feed("i");
+        eq(badge(), "I:insert");
+        feed("<Esc>v");
+        eq(badge(), "V:visual");
+        feed("<Esc>R");
+        eq(badge(), "R:replace");
+        feed("<Esc>");
+        eq(badge(), "N:normal");
     });
 
     return JSON.stringify(results);

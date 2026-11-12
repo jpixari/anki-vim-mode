@@ -1,61 +1,96 @@
+/* Mode indicator: a round badge in a corner of the editor, with pending
+   keys, messages and the ":" / "/" command line shown next to it. */
 #anki-vim-status {
   position: fixed;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
   z-index: 2147483647;
-
-  min-width: 150px;
-  max-width: 92vw;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 16px);
   box-sizing: border-box;
-  padding: 7px 16px;
+  pointer-events: none;
+  user-select: none;
+}
+
+#anki-vim-status,
+#anki-vim-status[data-position="bottom-left"] {
+  left: 8px;
+  bottom: 8px;
+}
+
+#anki-vim-status[data-position="bottom-right"] {
+  left: auto;
+  right: 8px;
+  bottom: 8px;
+  flex-direction: row-reverse;
+}
+
+#anki-vim-status[data-position="top-left"] {
+  left: 8px;
+  top: 8px;
+  bottom: auto;
+}
+
+#anki-vim-status[data-position="top-right"] {
+  left: auto;
+  right: 8px;
+  top: 8px;
+  bottom: auto;
+  flex-direction: row-reverse;
+}
+
+#anki-vim-status .anki-vim-badge {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #98be65;
+  color: #282c34;
+  box-shadow: 0 0 0 3px rgba(40, 44, 52, 0.9);
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body[data-anki-vim-mode="insert"] #anki-vim-status .anki-vim-badge {
+  background: #51afef;
+}
+
+body[data-anki-vim-mode="visual"] #anki-vim-status .anki-vim-badge {
+  background: #ecbe7b;
+}
+
+body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
+  background: #ff6c6b;
+}
+
+#anki-vim-status .anki-vim-info {
+  min-width: 0;
+  padding: 4px 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: pre;
 
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
+  border-radius: 6px;
+  background: rgba(40, 44, 52, 0.95);
+  color: #bbc2cf;
 
-  background: rgba(32, 36, 44, 0.92);
-  color: #f4f4f5;
-
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-align: center;
-
-  box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-
-  user-select: none;
-  pointer-events: none;
-}
-
-body[data-anki-vim-mode="insert"] #anki-vim-status {
-  background: rgba(24, 95, 64, 0.94);
-  color: #ecfdf5;
-}
-
-body[data-anki-vim-mode="visual"] #anki-vim-status,
-body[data-anki-vim-mode="vline"] #anki-vim-status {
-  background: rgba(88, 60, 150, 0.94);
-  color: #f5f3ff;
-}
-
-/* Command line (":" and "/") and messages: left-aligned, monospace. */
-#anki-vim-status.anki-vim-cmdline,
-#anki-vim-status.anki-vim-message {
-  min-width: min(420px, 92vw);
-  border-radius: 10px;
-  background: rgba(17, 17, 20, 0.95);
-  color: #f4f4f5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
     monospace;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-align: left;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+#anki-vim-status[data-kind="cmdline"] .anki-vim-info {
+  min-width: min(360px, 70vw);
+  color: #ffffff;
 }
 
 /* Block cursor. Colours, font and geometry are set from the character it
@@ -78,4 +113,13 @@ body[data-anki-vim-mode="vline"] #anki-vim-status {
 #anki-vim-block-cursor.anki-vim-cursor-atom {
   background: rgba(255, 255, 255, 0.95);
   mix-blend-mode: difference;
+}
+
+/* Visual-block selection rectangles. */
+#anki-vim-block-select > div {
+  position: fixed;
+  z-index: 2147483645;
+  background: Highlight;
+  opacity: 0.45;
+  pointer-events: none;
 }

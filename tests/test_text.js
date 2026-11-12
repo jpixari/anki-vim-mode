@@ -102,6 +102,22 @@ eq(T.clozeObject("plain", 2, false), null, "no cloze");
 eq(T.paragraphObject("a\nb\n\nc", 0, false), { start: 0, end: 3 }, "ip");
 eq(T.paragraphObject("a\nb\n\nc", 0, true), { start: 0, end: 4 }, "ap");
 
+// sentences
+const S = "One two. Three four! Five?\n\nNew para. End";
+eq(T.sentenceForward(S, 0), 9, ") next sentence");
+eq(T.sentenceForward(S, 9), 21, ") again");
+eq(T.sentenceForward(S, 21), 27, ") stops on the empty line");
+eq(T.sentenceForward(S, 27), 28, ") into next paragraph");
+eq(T.sentenceBack(S, 12), 9, "( to sentence start");
+eq(T.sentenceBack(S, 9), 0, "( previous");
+eq(T.sentenceObject(S, 11, false), { start: 9, end: 20 }, "is");
+eq(T.sentenceObject(S, 11, true), { start: 9, end: 21 }, "as");
+eq(T.sentenceObject("Just one", 3, false), { start: 0, end: 8 }, "is single");
+eq(T.numberAt("x 12 y -7", 0), { start: 2, end: 4 }, "number ahead");
+eq(T.numberAt("x 12 y -7", 3), { start: 2, end: 4 }, "number under cursor");
+eq(T.numberAt("x 12 y -7", 4), { start: 7, end: 9 }, "next number, negative");
+eq(T.numberAt("none", 0), null, "no number");
+
 // search
 eq(T.search("foo bar foo", "foo", 0, true, 1), 8, "/ forward");
 eq(T.search("foo bar foo", "foo", 8, true, 1), 0, "/ wraps");

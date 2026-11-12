@@ -347,6 +347,124 @@
         return s === -1 ? 0 : s;
     }
 
+    // ---- ( ) sentences ---------------------------------------------------
+
+    // Offsets where a sentence starts: after ". ", "! ", "? " (optionally
+    // followed by closing quotes/brackets), and at the start of a paragraph.
+    function sentenceStarts(text) {
+        const starts = [];
+        const n = text.length;
+        const push = (j) => {
+            if (j < n && starts[starts.length - 1] !== j) {
+                starts.push(j);
+            }
+        };
+        // Skip blanks, but stop on an empty line: it is a stop of its own.
+        const skip = (j) => {
+            while (j < n && isBlankChar(text[j]) && !isEmptyLine(text, j)) {
+                j++;
+            }
+
+            return j;
+        };
+
+        let i = skip(0);
+
+        push(i);
+
+        while (i < n) {
+            const ch = text[i];
+
+            if (isEmptyLine(text, i)) {
+                push(i);
+
+                let j = i;
+
+                while (j < n && isBlankChar(text[j])) {
+                    j++;
+                }
+
+                push(j);
+                i = j;
+                continue;
+            }
+
+            if (ch === "." || ch === "!" || ch === "?") {
+                let j = i + 1;
+
+                while (j < n && ")]\"'".includes(text[j])) {
+                    j++;
+                }
+
+                if (j < n && isBlankChar(text[j])) {
+                    j = skip(j);
+                    push(j);
+                    i = j;
+                    continue;
+                }
+            }
+
+            i++;
+        }
+
+        return starts;
+    }
+
+    function sentenceForward(text, pos) {
+        const next = sentenceStarts(text).find((s) => s > pos);
+        return next === undefined ? text.length : next;
+    }
+
+    function sentenceBack(text, pos) {
+        const prev = sentenceStarts(text)
+            .reverse()
+            .find((s) => s < pos);
+        return prev === undefined ? 0 : prev;
+    }
+
+    function sentenceObject(text, pos, around) {
+        const starts = sentenceStarts(text);
+        let start = 0;
+        let end = text.length;
+
+        for (let k = 0; k < starts.length; k++) {
+            if (starts[k] <= pos) {
+                start = starts[k];
+                end = k + 1 < starts.length ? starts[k + 1] : text.length;
+            }
+        }
+
+        if (!around) {
+            while (end > start && isBlankChar(text[end - 1])) {
+                end--;
+            }
+        } else {
+            // Never swallow the line break that ends the paragraph.
+            while (end > start && text[end - 1] === "\n") {
+                end--;
+            }
+        }
+
+        return { start, end };
+    }
+
+    // First number at or after pos on the line: { start, end } or null.
+    function numberAt(text, pos) {
+        const s = lineStart(text, pos);
+        const e = lineEnd(text, pos);
+        const regex = /-?\d+/g;
+        const line = text.slice(s, e);
+        let m;
+
+        while ((m = regex.exec(line)) !== null) {
+            if (s + m.index + m[0].length > pos) {
+                return { start: s + m.index, end: s + m.index + m[0].length };
+            }
+        }
+
+        return null;
+    }
+
     // ---- text objects ----------------------------------------------------
     // All return { start, end } with an exclusive end, or null.
 
@@ -685,6 +803,10 @@
         matchPair,
         paragraphForward,
         paragraphBack,
+        sentenceForward,
+        sentenceBack,
+        sentenceObject,
+        numberAt,
         wordObject,
         quoteObject,
         pairObject,

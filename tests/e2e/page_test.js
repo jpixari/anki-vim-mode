@@ -65,7 +65,7 @@
         out.afterDd2 = f.innerHTML;
         document.execCommand("undo");
         out.afterNativeUndo = f.innerHTML;
-        await feed("qwe");
+        await feed("Q!=");
         out.afterUnmappedKeys = f.innerHTML;
         await feed("ggyyP");
         out.afterYyP = f.innerHTML;
