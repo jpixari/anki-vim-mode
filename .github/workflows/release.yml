@@ -1,7 +1,9 @@
 # Builds the .ankiaddon package and publishes it as a GitHub release.
 #
-# To release: update "version" in manifest.json, commit, then
-#   git tag v3.0.0 && git push origin v3.0.0
+# To release: update "version" in manifest.json, commit, then create an
+# annotated tag whose message is the release notes (markdown) and push it:
+#   git tag -a v3.0.0 -F notes.md --cleanup=verbatim && git push origin v3.0.0
+# (--cleanup=verbatim keeps lines starting with "#", e.g. markdown headings.)
 name: Release
 
 on:
@@ -21,6 +23,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # actions/checkout replaces an annotated tag with a plain ref to the
+      # commit, which loses the message. Fetch the real tag object again.
+      - name: Fetch the tag message
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != "tag" ]; then
+            echo "Tag $GITHUB_REF_NAME is not annotated; create it with git tag -a so it carries the release notes" >&2
+            exit 1
+          fi
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Check the tag matches manifest.json
         run: |
@@ -46,4 +59,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "anki_vim_mode-$GITHUB_REF_NAME.ankiaddon" \
             --title "Anki Vim Mode ${GITHUB_REF_NAME#v}" \
-            --generate-notes
+            --notes-file "$RUNNER_TEMP/release-notes.md"
