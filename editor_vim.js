@@ -1,247 +1,3121 @@
 // editor_vim.js
+//
+// Vim mode for Anki's note editor.
+//
+// Design: every edit happens inside the field itself through the browser's
+// editing commands, so Anki sees ordinary input events and the native undo
+// history (Ctrl+Z, the undo button) keeps working. Nothing is round-tripped
+// through Python.
+//
+// A field is viewed through a *model*: its content flattened to a string
+// where each line break is "\n" and each non-text object (image, MathJax...)
+// is one placeholder character. Motions and text objects are computed on that
+// string by vim_text.js; this file maps string offsets back to DOM positions.
 
 (function () {
-    window.ankiVim = {
-        version: "debug-37-dd-cursor-visual-restore",
+    "use strict";
 
-        mode: window.ankiVim?.mode || "normal",
-        fieldIndex: window.ankiVim?.fieldIndex || 0,
-        vimLineIndex: window.ankiVim?.vimLineIndex || 0,
-        debugVisible: window.ankiVim?.debugVisible || false,
+    const VERSION = "3.0.0";
 
-        lastKey: "",
-        lastAction: "",
+    if (window.ankiVim && window.ankiVim.version === VERSION) {
+        window.ankiVim.applyConfig(window.ankiVimConfig || {});
+        return;
+    }
+
+    const T = window.AnkiVimText;
+
+    if (!T) {
+        console.log("[Anki Vim] vim_text.js was not loaded");
+        return;
+    }
+
+    const ATOM = T.ATOM;
+
+    const BLOCK_TAGS = new Set(
+        (
+            "DIV P UL OL LI H1 H2 H3 H4 H5 H6 BLOCKQUOTE PRE TABLE THEAD " +
+            "TBODY TFOOT TR TD TH SECTION ARTICLE HEADER FOOTER DL DT DD " +
+            "FIGURE FIGCAPTION ADDRESS CENTER HR"
+        ).split(" "),
+    );
+    const ATOM_TAGS = new Set(
+        (
+            "IMG ANKI-FRAME ANKI-MATHJAX SVG VIDEO AUDIO IFRAME OBJECT " +
+            "CANVAS INPUT BUTTON SELECT TEXTAREA HR"
+        ).split(" "),
+    );
+    const SKIP_TAGS = new Set(["STYLE", "SCRIPT", "TEMPLATE"]);
+    const FORMAT_TAGS = new Set(
+        (
+            "B STRONG I EM U S STRIKE DEL INS SUB SUP CODE KBD MARK SMALL " +
+            "BIG SPAN FONT A"
+        ).split(" "),
+    );
+
+    const config = {
+        shift_jk_fields: true,
+        insert_escape: "",
+        insert_escape_timeout_ms: 400,
+        start_in_insert: false,
+        system_clipboard: false,
+        jk_display_lines: false,
+        show_status: true,
+    };
+
+    // ======================================================================
+    // DOM model
+    // ======================================================================
+
+    function isBlock(el) {
+        return BLOCK_TAGS.has(el.tagName);
+    }
+
+    function isAtom(el) {
+        return (
+            ATOM_TAGS.has(el.tagName) ||
+            el.getAttribute("contenteditable") === "false"
+        );
+    }
+
+    // Whitespace between block tags in pretty-printed HTML is not rendered.
+    function isSkippableText(node) {
+        const d = node.data;
+        return d.length === 0 || (/^[ \t\r\n]+$/.test(d) && /[\r\n]/.test(d));
+    }
+
+    function childIndex(node) {
+        let i = 0;
+
+        for (let n = node.previousSibling; n; n = n.previousSibling) {
+            i++;
+        }
+
+        return i;
+    }
+
+    // A <br> with nothing after it in its block does not start a new line;
+    // it only keeps an otherwise empty line open ("a<br>" is one line).
+    function isFillerBr(br, root) {
+        let node = br;
+
+        for (;;) {
+            while (!node.nextSibling) {
+                node = node.parentNode;
+
+                if (!node || node === root || isBlock(node)) {
+                    return true;
+                }
+            }
+
+            node = node.nextSibling;
+
+            for (;;) {
+                if (node.nodeType === 3) {
+                    if (!isSkippableText(node)) {
+                        return false;
+                    }
+
+                    break;
+                }
+
+                if (node.nodeType !== 1 || SKIP_TAGS.has(node.tagName)) {
+                    break;
+                }
+
+                if (node.tagName === "BR") {
+                    return false;
+                }
+
+                if (isBlock(node)) {
+                    return true;
+                }
+
+                if (isAtom(node)) {
+                    return false;
+                }
+
+                if (!node.firstChild) {
+                    break;
+                }
+
+                node = node.firstChild;
+            }
+        }
+    }
+
+    // probes: [{n, o}] DOM positions to translate into text offsets.
+    function buildModel(root, probes) {
+        const chars = [];
+        const out = [];
+        const fill = new Map();
+        const textBase = new Map();
+        const atomIndex = new Map();
+        const flushed = new Set();
+        const probeHits = (probes || []).map(() => null);
+
+        let touched = false;
+        let pending = false;
+        let seq = 0;
+
+        function flush() {
+            if (pending) {
+                chars.push({ k: "v" });
+                out.push("\n");
+                flushed.add(seq);
+                pending = false;
+            }
+        }
+
+        function boundary() {
+            if (touched) {
+                pending = true;
+                seq++;
+                touched = false;
+            }
+        }
+
+        function checkProbes(node, offset) {
+            if (!probes) {
+                return;
+            }
+
+            for (let i = 0; i < probes.length; i++) {
+                const p = probes[i];
+
+                if (
+                    p &&
+                    probeHits[i] === null &&
+                    p.n === node &&
+                    p.o === offset
+                ) {
+                    probeHits[i] = {
+                        len: chars.length,
+                        seq: pending ? seq : 0,
+                    };
+                }
+            }
+        }
+
+        function visitChildren(node) {
+            let i = 0;
+
+            for (let c = node.firstChild; c; c = c.nextSibling, i++) {
+                checkProbes(node, i);
+                visit(c);
+            }
+
+            checkProbes(node, i);
+        }
+
+        function visit(node) {
+            if (node.nodeType === 3) {
+                if (isSkippableText(node)) {
+                    textBase.set(node, {
+                        len: chars.length,
+                        seq: pending ? seq : 0,
+                        skip: true,
+                    });
+                    return;
+                }
+
+                flush();
+                textBase.set(node, { len: chars.length });
+
+                const data = node.data;
+
+                for (let k = 0; k < data.length; k++) {
+                    const ch = data[k];
+
+                    chars.push({ k: "t", n: node, o: k });
+                    out.push(ch === "\n" || ch === "\r" ? " " : ch);
+                }
+
+                touched = true;
+                return;
+            }
+
+            if (node.nodeType !== 1 || SKIP_TAGS.has(node.tagName)) {
+                return;
+            }
+
+            if (node.tagName === "BR") {
+                flush();
+
+                if (isFillerBr(node, root)) {
+                    fill.set(chars.length, node);
+                    touched = true;
+                } else {
+                    chars.push({ k: "b", n: node });
+                    out.push("\n");
+                    touched = false;
+                }
+
+                return;
+            }
+
+            const block = isBlock(node);
+
+            if (isAtom(node)) {
+                if (block) {
+                    boundary();
+                }
+
+                flush();
+                atomIndex.set(node, chars.length);
+                chars.push({ k: "a", n: node });
+                out.push(ATOM);
+                touched = true;
+
+                if (block) {
+                    boundary();
+                }
+
+                return;
+            }
+
+            if (block) {
+                boundary();
+            }
+
+            visitChildren(node);
+
+            if (block) {
+                boundary();
+            }
+        }
+
+        visitChildren(root);
+
+        const model = {
+            root,
+            chars,
+            fill,
+            text: out.join(""),
+        };
+
+        function resolve(i) {
+            const p = probes[i];
+
+            if (!p || !p.n) {
+                return null;
+            }
+
+            if (p.n.nodeType === 3) {
+                const base = textBase.get(p.n);
+
+                if (base && !base.skip) {
+                    return base.len + Math.min(p.o, p.n.data.length);
+                }
+
+                if (base) {
+                    return base.len + (base.seq && flushed.has(base.seq) ? 1 : 0);
+                }
+            }
+
+            const hit = probeHits[i];
+
+            if (hit) {
+                return hit.len + (hit.seq && flushed.has(hit.seq) ? 1 : 0);
+            }
+
+            // Caret inside an atom (e.g. within a MathJax frame).
+            for (let n = p.n; n && n !== root; n = n.parentNode) {
+                if (atomIndex.has(n)) {
+                    return atomIndex.get(n);
+                }
+            }
+
+            return null;
+        }
+
+        model.probeOffsets = (probes || []).map((_, i) => resolve(i));
+        return model;
+    }
+
+    function posBefore(c) {
+        if (c.k === "t") {
+            return { n: c.n, o: c.o };
+        }
+
+        return { n: c.n.parentNode, o: childIndex(c.n) };
+    }
+
+    function posAfter(c) {
+        if (c.k === "t") {
+            return { n: c.n, o: c.o + 1 };
+        }
+
+        return { n: c.n.parentNode, o: childIndex(c.n) + 1 };
+    }
+
+    // DOM caret position for text offset i. A caret normally attaches to the
+    // character before it (so typing continues that character's formatting);
+    // forward=true attaches to the character after it instead, which is what
+    // the start of a range wants.
+    function domPos(m, i, forward) {
+        const len = m.text.length;
+
+        i = T.clamp(i, 0, len);
+
+        if (forward && i < len && m.chars[i].k !== "v") {
+            return posBefore(m.chars[i]);
+        }
+
+        if (i > 0 && m.text[i - 1] !== "\n") {
+            return posAfter(m.chars[i - 1]);
+        }
+
+        if (i < len && m.chars[i].k !== "v") {
+            return posBefore(m.chars[i]);
+        }
+
+        const br = m.fill.get(i);
+
+        if (br && br.parentNode) {
+            return { n: br.parentNode, o: childIndex(br) };
+        }
+
+        if (i > 0 && m.chars[i - 1].k === "b") {
+            return posAfter(m.chars[i - 1]);
+        }
+
+        return { n: m.root, o: i === 0 ? 0 : m.root.childNodes.length };
+    }
+
+    // ======================================================================
+    // State
+    // ======================================================================
+
+    const V = {
+        mode: "normal",
+        field: null,
+        lastField: null,
+        model: null,
+        pos: 0,
+        desiredCol: 0,
+        stamp: null,
+        vAnchor: 0,
+        lastVisual: null,
+        keys: [],
+        regs: {},
+        clipboardText: "",
+        lastClipWrite: null,
+        lastFind: null,
+        lastSearch: null,
+        lastChange: null,
+        pendingDot: null,
+        replaying: false,
+        change: null,
+        undo: [],
+        redo: [],
+        insert: null,
+        escapeArmed: 0,
+        cmdline: null,
+        message: "",
+        messageTimer: 0,
+        posMemo: new WeakMap(),
         statusEl: null,
+        cursorEl: null,
+        drawQueued: false,
+    };
 
-        pendingOperator: null,
-        visualAnchorOffset: null,
+    // ======================================================================
+    // Fields, focus and selection
+    // ======================================================================
 
-        yankText: window.ankiVim?.yankText || "",
-        yankIsLine: window.ankiVim?.yankIsLine || false,
+    function isFieldEditable(el) {
+        if (!el || el.nodeType !== 1 || !el.isContentEditable) {
+            return false;
+        }
 
-        pythonCaretOffset: window.ankiVim?.pythonCaretOffset || 0,
+        if (el.tagName === "ANKI-EDITABLE") {
+            return true;
+        }
 
-        lastPointerLineIndex: window.ankiVim?.lastPointerLineIndex ?? null,
-        lastPointerFieldIndex: window.ankiVim?.lastPointerFieldIndex ?? null,
-        lastPointerTime: window.ankiVim?.lastPointerTime || 0,
+        const rootNode = el.getRootNode();
+        const host = rootNode && rootNode.host;
 
-        lastInternalLineMoveTime: window.ankiVim?.lastInternalLineMoveTime || 0,
+        return (
+            (host &&
+                host.classList &&
+                host.classList.contains("rich-text-editable")) ||
+            (el.classList && el.classList.contains("rich-text-editable"))
+        );
+    }
 
-        lineSyncLockUntil: window.ankiVim?.lineSyncLockUntil || 0,
-        lockedVimLineIndex: window.ankiVim?.lockedVimLineIndex ?? null,
+    function allFields() {
+        const out = [];
 
-        virtualBlockCursorUntil: window.ankiVim?.virtualBlockCursorUntil || 0,
-        virtualBlockCursorReason:
-            window.ankiVim?.virtualBlockCursorReason || "",
+        for (const host of document.querySelectorAll(".rich-text-editable")) {
+            const root = host.shadowRoot;
+            const editable = root
+                ? root.querySelector("anki-editable,[contenteditable]")
+                : host.isContentEditable
+                  ? host
+                  : null;
 
-        init: function () {
-            this.installStyle();
-            this.installShadowCaretStyle();
-            this.cleanupOldLineCursor();
-            this.makeStatus();
-            this.installKeyHandler();
-            this.installCursorTrackers();
-            this.setMode(this.mode || "normal");
-            console.log(
-                "[Anki Vim] initialized debug-37-dd-cursor-visual-restore",
+            if (editable && editable.getClientRects().length > 0) {
+                out.push(editable);
+            }
+        }
+
+        if (out.length === 0) {
+            for (const el of document.querySelectorAll("anki-editable")) {
+                if (el.getClientRects().length > 0) {
+                    out.push(el);
+                }
+            }
+        }
+
+        return out;
+    }
+
+    function deepActive() {
+        let a = document.activeElement;
+
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) {
+            a = a.shadowRoot.activeElement;
+        }
+
+        return a;
+    }
+
+    function activeField() {
+        let a = deepActive();
+
+        while (a && a.nodeType === 1) {
+            if (isFieldEditable(a)) {
+                // The editing host is the outermost editable element.
+                let hostEl = a;
+
+                while (
+                    hostEl.parentElement &&
+                    hostEl.parentElement.isContentEditable
+                ) {
+                    hostEl = hostEl.parentElement;
+                }
+
+                return hostEl;
+            }
+
+            a = a.parentElement;
+        }
+
+        return null;
+    }
+
+    function getSel(field) {
+        const rootNode = field.getRootNode();
+
+        if (rootNode && typeof rootNode.getSelection === "function") {
+            return rootNode.getSelection();
+        }
+
+        return window.getSelection();
+    }
+
+    function selProbes(field) {
+        const sel = getSel(field);
+
+        if (!sel || sel.rangeCount === 0 || !sel.anchorNode) {
+            return null;
+        }
+
+        if (
+            !field.contains(sel.anchorNode) ||
+            !field.contains(sel.focusNode)
+        ) {
+            return null;
+        }
+
+        return [
+            { n: sel.anchorNode, o: sel.anchorOffset },
+            { n: sel.focusNode, o: sel.focusOffset },
+        ];
+    }
+
+    // Rebuild the model of the current field. model.anchor / model.caret are
+    // the text offsets of the DOM selection (null when it is elsewhere).
+    function remodel() {
+        const field = V.field;
+
+        if (!field) {
+            V.model = null;
+            return null;
+        }
+
+        const probes = selProbes(field);
+        const m = buildModel(field, probes);
+
+        m.anchor = probes ? m.probeOffsets[0] : null;
+        m.caret = probes ? m.probeOffsets[1] : null;
+        m.collapsed = probes
+            ? probes[0].n === probes[1].n && probes[0].o === probes[1].o
+            : true;
+        V.model = m;
+        return m;
+    }
+
+    function setSel(m, a, b) {
+        const sel = getSel(m.root);
+
+        if (!sel) {
+            return;
+        }
+
+        const pa = domPos(m, a, a < b);
+        const pb = a === b ? pa : domPos(m, b, b < a);
+
+        try {
+            sel.setBaseAndExtent(pa.n, pa.o, pb.n, pb.o);
+        } catch (error) {
+            console.log("[Anki Vim] setSel failed", error);
+        }
+
+        V.stamp = { field: m.root, n: pb.n, o: pb.o };
+    }
+
+    function stampMatches(field) {
+        const s = V.stamp;
+
+        if (!s || s.field !== field) {
+            return false;
+        }
+
+        const sel = getSel(field);
+
+        return (
+            !!sel &&
+            sel.rangeCount > 0 &&
+            sel.focusNode === s.n &&
+            sel.focusOffset === s.o
+        );
+    }
+
+    function isVisual() {
+        return V.mode === "visual" || V.mode === "vline";
+    }
+
+    // Bring V.model / V.pos up to date with the DOM before running a command.
+    function sync() {
+        const field = V.field;
+
+        if (!field) {
+            return null;
+        }
+
+        const keep = stampMatches(field);
+        const m = remodel();
+
+        if (!isVisual() && !keep) {
+            if (m.caret !== null) {
+                V.pos = m.caret;
+            } else {
+                V.pos = V.posMemo.get(field) || 0;
+            }
+
+            V.pos = T.clampNormal(m.text, V.pos);
+            V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+        }
+
+        V.pos = T.clamp(V.pos, 0, m.text.length);
+        V.vAnchor = T.clamp(V.vAnchor, 0, m.text.length);
+        return m;
+    }
+
+    function visualBounds(m) {
+        const lo = Math.min(V.vAnchor, V.pos);
+        const hi = Math.max(V.vAnchor, V.pos);
+
+        if (V.mode === "vline") {
+            return {
+                start: T.lineStart(m.text, lo),
+                end: T.lineEnd(m.text, hi),
+                lw: true,
+            };
+        }
+
+        return { start: lo, end: Math.min(hi + 1, m.text.length), lw: false };
+    }
+
+    // Put the DOM selection where the vim cursor / visual area is.
+    function placeCursor() {
+        const m = V.model;
+
+        if (!m) {
+            return;
+        }
+
+        if (V.mode === "visual") {
+            const len = m.text.length;
+
+            if (V.pos >= V.vAnchor) {
+                setSel(m, V.vAnchor, Math.min(V.pos + 1, len));
+            } else {
+                setSel(m, Math.min(V.vAnchor + 1, len), V.pos);
+            }
+        } else if (V.mode === "vline") {
+            const b = visualBounds(m);
+            setSel(m, b.start, b.end);
+        } else {
+            setSel(m, V.pos, V.pos);
+        }
+
+        V.posMemo.set(m.root, V.pos);
+        queueDraw();
+    }
+
+    function focusField(field, pos) {
+        if (!field) {
+            return;
+        }
+
+        try {
+            field.focus({ preventScroll: true });
+        } catch (error) {
+            field.focus();
+        }
+
+        V.field = field;
+        V.lastField = field;
+        V.stamp = null;
+
+        const m = remodel();
+        const target =
+            pos !== undefined && pos !== null
+                ? pos
+                : V.posMemo.get(field) || 0;
+
+        if (V.mode === "insert") {
+            setSel(m, T.clamp(target, 0, m.text.length), target);
+        } else {
+            V.mode = "normal";
+            V.pos = T.clampNormal(m.text, target);
+            V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+            placeCursor();
+        }
+
+        updateStatus();
+    }
+
+    function moveField(delta) {
+        const fields = allFields();
+
+        if (fields.length === 0) {
+            return;
+        }
+
+        const idx = fields.indexOf(V.field);
+        const next =
+            idx === -1
+                ? 0
+                : (idx + delta + fields.length * 8) % fields.length;
+
+        if (V.field) {
+            V.posMemo.set(V.field, V.pos);
+        }
+
+        focusField(fields[next]);
+    }
+
+    // ======================================================================
+    // Editing primitives (all through execCommand => native undo history)
+    // ======================================================================
+
+    function exec(command, value) {
+        try {
+            return document.execCommand(command, false, value);
+        } catch (error) {
+            console.log("[Anki Vim] execCommand failed", command, error);
+            return false;
+        }
+    }
+
+    function deleteRange(a, b) {
+        if (a < b) {
+            setSel(V.model, a, b);
+            exec("delete");
+        }
+
+        return remodel();
+    }
+
+    // Insert plain text (may contain "\n") at the current DOM caret.
+    function typeText(str) {
+        const parts = str.split("\n");
+
+        for (let i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                exec("insertLineBreak");
+            }
+
+            const part = parts[i].split(ATOM).join("");
+
+            if (part) {
+                exec("insertText", part);
+            }
+        }
+    }
+
+    function replaceRange(a, b, str) {
+        setSel(V.model, a, b);
+
+        if (str === "") {
+            if (a < b) {
+                exec("delete");
+            }
+        } else if (!str.includes("\n") && !str.includes(ATOM)) {
+            exec("insertText", str);
+        } else {
+            if (a < b) {
+                exec("delete");
+            }
+
+            typeText(str);
+        }
+
+        return remodel();
+    }
+
+    function escapeHtml(str) {
+        return str
+            .split(ATOM)
+            .join("")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    // Anki decorates MathJax inside a field: <anki-mathjax> gets wrapped in an
+    // <anki-frame> with helper elements and a rendered image. That live form
+    // must never be re-inserted or compared; reduce it to the plain element
+    // Anki itself creates when it loads a field, which it then re-decorates.
+    function normalizeFragment(holder) {
+        for (const mj of Array.from(holder.querySelectorAll("anki-mathjax"))) {
+            const frame = mj.closest("anki-frame");
+            const fresh = document.createElement("anki-mathjax");
+
+            if (
+                mj.getAttribute("block") === "true" ||
+                (frame && frame.getAttribute("block") === "true")
+            ) {
+                fresh.setAttribute("block", "true");
+            }
+
+            fresh.textContent =
+                mj.dataset.mathjax !== undefined
+                    ? mj.dataset.mathjax
+                    : mj.textContent;
+            (frame && holder.contains(frame) ? frame : mj).replaceWith(fresh);
+        }
+
+        for (const frame of Array.from(holder.querySelectorAll("anki-frame"))) {
+            frame.replaceWith(...Array.from(frame.childNodes));
+        }
+
+        for (const el of Array.from(
+            holder.querySelectorAll("frame-start,frame-end"),
+        )) {
+            el.remove();
+        }
+    }
+
+    const FRAMED = /<anki-(frame|mathjax)/;
+
+    // Field content in a form that is stable across Anki's decoration.
+    function fieldHtml(field) {
+        const html = field.innerHTML;
+
+        if (!FRAMED.test(html)) {
+            return html;
+        }
+
+        const holder = document.createElement("div");
+
+        for (const child of Array.from(field.childNodes)) {
+            holder.appendChild(child.cloneNode(true));
+        }
+
+        normalizeFragment(holder);
+        return holder.innerHTML;
+    }
+
+    // HTML of the text range [a, b) including the inline formatting that
+    // surrounds it, or null when it is just plain text.
+    function rangeHtml(m, a, b) {
+        if (a >= b) {
+            return null;
+        }
+
+        const pa = domPos(m, a, true);
+        const pb = domPos(m, b);
+        const range = document.createRange();
+
+        try {
+            range.setStart(pa.n, pa.o);
+            range.setEnd(pb.n, pb.o);
+        } catch (error) {
+            return null;
+        }
+
+        const holder = document.createElement("div");
+        holder.appendChild(range.cloneContents());
+        normalizeFragment(holder);
+
+        let hasMarkup = holder.querySelector("*") !== null;
+        let node = range.commonAncestorContainer;
+
+        while (node && node !== m.root) {
+            if (node.nodeType === 1 && FORMAT_TAGS.has(node.tagName)) {
+                const wrap = node.cloneNode(false);
+
+                while (holder.firstChild) {
+                    wrap.appendChild(holder.firstChild);
+                }
+
+                holder.appendChild(wrap);
+                hasMarkup = true;
+            }
+
+            node = node.parentNode;
+        }
+
+        return hasMarkup ? holder.innerHTML : null;
+    }
+
+    // ======================================================================
+    // Registers
+    // ======================================================================
+
+    function sendPython(payload) {
+        try {
+            if (typeof pycmd === "function") {
+                pycmd("anki_vim:" + JSON.stringify(payload));
+            }
+        } catch (error) {
+            console.log("[Anki Vim] pycmd failed", error);
+        }
+    }
+
+    function captureRange(m, range) {
+        const text = m.text.slice(range.start, range.end);
+
+        if (range.lw) {
+            const htmlLines = [];
+            let any = false;
+            let s = range.start;
+
+            for (const line of text.split("\n")) {
+                const h = rangeHtml(m, s, s + line.length);
+
+                htmlLines.push(h);
+                any = any || h !== null;
+                s += line.length + 1;
+            }
+
+            return {
+                text: text + "\n",
+                linewise: true,
+                htmlLines: any ? htmlLines : null,
+            };
+        }
+
+        return {
+            text,
+            linewise: false,
+            html: text.includes("\n") ? null : rangeHtml(m, range.start, range.end),
+        };
+    }
+
+    function setRegister(name, data, kind) {
+        if (name === "_") {
+            return;
+        }
+
+        if (name && /^[A-Z]$/.test(name)) {
+            const key = name.toLowerCase();
+            const old = V.regs[key];
+
+            if (old) {
+                data = {
+                    text: old.text + data.text,
+                    linewise: old.linewise || data.linewise,
+                };
+            }
+
+            name = key;
+        }
+
+        if (name && name !== '"' && name !== "+" && name !== "*") {
+            V.regs[name] = data;
+        }
+
+        V.regs['"'] = data;
+
+        if (!name && kind === "yank") {
+            V.regs["0"] = data;
+        }
+
+        if (name === "+" || name === "*" || (!name && config.system_clipboard)) {
+            V.lastClipWrite = data;
+            V.clipboardText = data.text;
+            sendPython({ cmd: "clip", text: data.text });
+        }
+    }
+
+    function getRegister(name) {
+        if (name === "+" || name === "*" || (!name && config.system_clipboard)) {
+            const clip = V.clipboardText || "";
+
+            if (V.lastClipWrite && V.lastClipWrite.text === clip) {
+                return V.lastClipWrite;
+            }
+
+            if (clip) {
+                return { text: clip, linewise: false };
+            }
+
+            return name ? null : V.regs['"'] || null;
+        }
+
+        if (!name) {
+            return V.regs['"'] || null;
+        }
+
+        return V.regs[name.toLowerCase()] || null;
+    }
+
+    // ======================================================================
+    // Undo / redo
+    // ======================================================================
+    //
+    // A vim command can be several native edit steps (and an insert session
+    // is many). We remember the field HTML before and after each vim change
+    // and step the *native* undo history until the field matches again, so
+    // `u` undoes one whole vim change while Ctrl+Z keeps working as usual.
+
+    function beginChange() {
+        if (V.change || !V.field) {
+            return;
+        }
+
+        V.change = {
+            field: V.field,
+            before: fieldHtml(V.field),
+            posBefore: V.pos,
+        };
+    }
+
+    function endChange() {
+        const c = V.change;
+
+        if (!c) {
+            return false;
+        }
+
+        V.change = null;
+
+        const after = fieldHtml(c.field);
+
+        if (after === c.before) {
+            return false;
+        }
+
+        c.after = after;
+        c.posAfter = V.pos;
+        V.undo.push(c);
+        V.redo.length = 0;
+
+        if (V.undo.length > 500) {
+            V.undo.shift();
+        }
+
+        return true;
+    }
+
+    function stepHistory(command, field, target) {
+        let prev = fieldHtml(field);
+
+        for (let i = 0; i < 400; i++) {
+            exec(command);
+
+            const html = fieldHtml(field);
+
+            if (html === target) {
+                return true;
+            }
+
+            if (html === prev) {
+                return false;
+            }
+
+            prev = html;
+        }
+
+        return false;
+    }
+
+    // Last resort: put the remembered content back wholesale. Still an
+    // ordinary edit, so Anki saves it and Ctrl+Z can step over it.
+    function restoreSnapshot(field, html) {
+        const sel = getSel(field);
+
+        sel.selectAllChildren(field);
+
+        if (html === "") {
+            exec("delete");
+        } else {
+            exec("insertHTML", html);
+        }
+    }
+
+    function undoRedo(isUndo, count) {
+        const from = isUndo ? V.undo : V.redo;
+        const to = isUndo ? V.redo : V.undo;
+        const command = isUndo ? "undo" : "redo";
+        let moved = false;
+
+        for (let n = 0; n < count; n++) {
+            const rec = from.pop();
+
+            if (!rec) {
+                if (n === 0) {
+                    // Nothing recorded by us: fall back to one native step
+                    // (e.g. text typed before vim mode touched the field).
+                    exec(command);
+                    showMessage(
+                        isUndo
+                            ? "Already at oldest vim change"
+                            : "Already at newest vim change",
+                    );
+                }
+
+                break;
+            }
+
+            const current = isUndo ? rec.after : rec.before;
+            const target = isUndo ? rec.before : rec.after;
+
+            if (!rec.field.isConnected || fieldHtml(rec.field) !== current) {
+                // The field was changed behind our back (new note loaded,
+                // toolbar edit, ...). Our records no longer apply.
+                V.undo.length = 0;
+                V.redo.length = 0;
+                exec(command);
+                break;
+            }
+
+            if (rec.field !== V.field) {
+                focusField(rec.field);
+            }
+
+            // The browser's history is exact when it works, but it cannot
+            // follow Anki's MathJax decoration; verify, else restore.
+            const framed = FRAMED.test(rec.before + rec.after);
+
+            if (framed || !stepHistory(command, rec.field, target)) {
+                restoreSnapshot(rec.field, target);
+
+                const actual = fieldHtml(rec.field);
+
+                if (actual !== target) {
+                    // The browser normalised the markup slightly: keep the
+                    // neighbouring records consistent with what is there.
+                    const neighbour = from[from.length - 1];
+
+                    if (isUndo) {
+                        rec.before = actual;
+
+                        if (neighbour && neighbour.after === target) {
+                            neighbour.after = actual;
+                        }
+                    } else {
+                        rec.after = actual;
+
+                        if (neighbour && neighbour.before === target) {
+                            neighbour.before = actual;
+                        }
+                    }
+                }
+            }
+
+            to.push(rec);
+            V.pos = rec.posBefore;
+            moved = true;
+        }
+
+        V.stamp = null;
+
+        const m = remodel();
+
+        if (m) {
+            if (!moved && m.caret !== null) {
+                V.pos = m.caret;
+            }
+
+            V.pos = T.clampNormal(m.text, V.pos);
+            V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+            placeCursor();
+        }
+    }
+
+    // ======================================================================
+    // Key names and command grammar
+    // ======================================================================
+
+    const NAMED_KEYS = {
+        Escape: "<Esc>",
+        Enter: "<CR>",
+        Backspace: "<BS>",
+        Delete: "<Del>",
+        ArrowLeft: "<Left>",
+        ArrowRight: "<Right>",
+        ArrowUp: "<Up>",
+        ArrowDown: "<Down>",
+        Home: "<Home>",
+        End: "<End>",
+    };
+    const IGNORED_KEYS = new Set([
+        "Shift",
+        "Control",
+        "Alt",
+        "Meta",
+        "CapsLock",
+        "Dead",
+        "Process",
+        "Unidentified",
+        "AltGraph",
+        "NumLock",
+        "ScrollLock",
+        "OS",
+        "Hyper",
+        "Super",
+        "Compose",
+    ]);
+    const NORMAL_CTRL = new Set(["<C-r>", "<C-[>"]);
+    const PASS = "<pass>";
+
+    function keyName(event) {
+        const k = event.key;
+
+        if (!k || IGNORED_KEYS.has(k)) {
+            return null;
+        }
+
+        if (event.metaKey) {
+            return PASS;
+        }
+
+        // Ctrl+Alt together is AltGr on Windows keyboard layouts.
+        if (event.ctrlKey && !event.altKey) {
+            return k.length === 1 ? "<C-" + k.toLowerCase() + ">" : PASS;
+        }
+
+        if (event.altKey && !event.ctrlKey) {
+            return PASS;
+        }
+
+        if (k.length === 1) {
+            return k;
+        }
+
+        return NAMED_KEYS[k] || PASS;
+    }
+
+    const OPERATORS = new Set(["d", "c", "y", "gu", "gU", "g~"]);
+    const MOTIONS = new Set(
+        (
+            "h l j k w W b B e E ge gE 0 ^ $ g_ gg G f F t T ; , { } % | " +
+            "n N * # + - _ gj gk <CR> <BS> <Left> <Right> <Up> <Down> " +
+            "<Home> <End>"
+        )
+            .split(" ")
+            .concat([" "]),
+    );
+    const CHAR_ARG = new Set(["f", "F", "t", "T"]);
+    const OBJECT_TYPES = new Set(
+        "w W \" ' ` ( ) b [ ] { } B < > p c".split(" "),
+    );
+    const NORMAL_ACTIONS = new Set(
+        (
+            "i a I A o O x X s S D C Y p P u . v V r ~ J K gJ gv : / ? " +
+            "<C-r> <Del> <Esc> <C-[> ZZ ZQ"
+        ).split(" "),
+    );
+    const VISUAL_ACTIONS = new Set(
+        (
+            "d x X D y Y c s C S R u U ~ gu gU g~ J gJ p P r o v V : " +
+            "<Del> <Esc> <C-[>"
+        ).split(" "),
+    );
+    const PREFIX_KEYS = new Set(["g", "Z", "z"]);
+
+    const INCOMPLETE = { status: "incomplete" };
+    const INVALID = { status: "invalid" };
+
+    function parse(keys, visual) {
+        const cmd = {
+            reg: null,
+            count: null,
+            op: null,
+            self: false,
+            motion: null,
+            obj: null,
+            action: null,
+            arg: null,
+        };
+        let i = 0;
+        let c1 = "";
+        let c2 = "";
+
+        while (keys[i] === '"') {
+            if (i + 1 >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            if (!/^[a-zA-Z0-9+*_"-]$/.test(keys[i + 1])) {
+                return INVALID;
+            }
+
+            cmd.reg = keys[i + 1] === '"' ? null : keys[i + 1];
+            i += 2;
+        }
+
+        while (
+            i < keys.length &&
+            /^[0-9]$/.test(keys[i]) &&
+            !(c1 === "" && keys[i] === "0")
+        ) {
+            c1 += keys[i++];
+        }
+
+        if (i >= keys.length) {
+            return INCOMPLETE;
+        }
+
+        let k = keys[i++];
+
+        if (PREFIX_KEYS.has(k)) {
+            if (i >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            k += keys[i++];
+        }
+
+        function readArg() {
+            if (i >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            const a = keys[i++];
+
+            if (a.length !== 1) {
+                return INVALID;
+            }
+
+            cmd.arg = a;
+            return null;
+        }
+
+        function finish() {
+            if (i < keys.length) {
+                return INVALID;
+            }
+
+            if (c1 || c2) {
+                cmd.count =
+                    (c1 ? parseInt(c1, 10) : 1) * (c2 ? parseInt(c2, 10) : 1);
+            }
+
+            return { status: "done", cmd };
+        }
+
+        function readObject(around) {
+            if (i >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            const type = keys[i++];
+
+            if (!OBJECT_TYPES.has(type)) {
+                return INVALID;
+            }
+
+            cmd.obj = { around, type };
+            return null;
+        }
+
+        if (visual) {
+            if (k === "i" || k === "a") {
+                return readObject(k === "a") || finish();
+            }
+
+            if (VISUAL_ACTIONS.has(k)) {
+                cmd.action = k;
+
+                if (k === "r") {
+                    return readArg() || finish();
+                }
+
+                return finish();
+            }
+        } else if (OPERATORS.has(k)) {
+            cmd.op = k;
+
+            while (
+                i < keys.length &&
+                /^[0-9]$/.test(keys[i]) &&
+                !(c2 === "" && keys[i] === "0")
+            ) {
+                c2 += keys[i++];
+            }
+
+            if (i >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            let m = keys[i++];
+
+            if (m === "<Esc>" || m === "<C-[>") {
+                return INVALID;
+            }
+
+            if (PREFIX_KEYS.has(m)) {
+                if (i >= keys.length) {
+                    return INCOMPLETE;
+                }
+
+                m += keys[i++];
+            }
+
+            // dd, cc, yy, guu, gUU, g~~ (and gugu, gUgU, g~g~).
+            if (m === k || (k.length === 2 && m === k[1])) {
+                cmd.self = true;
+                return finish();
+            }
+
+            if (m === "i" || m === "a") {
+                return readObject(m === "a") || finish();
+            }
+
+            if (!MOTIONS.has(m)) {
+                return INVALID;
+            }
+
+            cmd.motion = m;
+
+            if (CHAR_ARG.has(m)) {
+                return readArg() || finish();
+            }
+
+            return finish();
+        } else if (NORMAL_ACTIONS.has(k)) {
+            cmd.action = k;
+
+            if (k === "r") {
+                return readArg() || finish();
+            }
+
+            return finish();
+        }
+
+        if (MOTIONS.has(k)) {
+            cmd.motion = k;
+
+            if (CHAR_ARG.has(k)) {
+                return readArg() || finish();
+            }
+
+            return finish();
+        }
+
+        return INVALID;
+    }
+
+    // ======================================================================
+    // Motions
+    // ======================================================================
+
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function displayLineMove(m, pos, delta) {
+        const sel = getSel(m.root);
+
+        setSel(m, pos, pos);
+
+        for (let i = 0; i < Math.abs(delta); i++) {
+            sel.modify("move", delta > 0 ? "forward" : "backward", "line");
+        }
+
+        const m2 = remodel();
+
+        return m2.caret === null ? pos : m2.caret;
+    }
+
+    // Returns { pos, inc, lw, col, keepCol } or null when the motion fails.
+    function computeMotion(name, arg, ctx) {
+        const { text, pos, count: n, hasCount, forOp } = ctx;
+        const len = text.length;
+        const ls = T.lineStart(text, pos);
+        const le = T.lineEnd(text, pos);
+
+        switch (name) {
+            case "h":
+            case "<Left>":
+            case "<BS>":
+                return { pos: Math.max(ls, pos - n) };
+
+            case "l":
+            case "<Right>":
+            case " ":
+                return {
+                    pos: Math.min(forOp ? le : T.lineLast(text, pos), pos + n),
+                };
+
+            case "j":
+            case "<Down>":
+            case "k":
+            case "<Up>": {
+                const down = name === "j" || name === "<Down>";
+
+                if (config.jk_display_lines && !forOp) {
+                    return {
+                        pos: displayLineMove(V.model, pos, down ? n : -n),
+                    };
+                }
+
+                const p = T.moveLines(text, pos, down ? n : -n, V.desiredCol);
+
+                if (T.lineStart(text, p) === ls) {
+                    return null;
+                }
+
+                return { pos: p, lw: true, keepCol: true };
+            }
+
+            case "gj":
+            case "gk":
+                if (forOp) {
+                    return null;
+                }
+
+                return {
+                    pos: displayLineMove(V.model, pos, name === "gj" ? n : -n),
+                };
+
+            case "w":
+            case "W": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.wordForward(text, p, name === "W");
+                }
+
+                if (forOp && p < len) {
+                    // An operator never eats the line break after the last
+                    // word of a line ("dw" on the last word stops at EOL).
+                    const pls = T.lineStart(text, p);
+
+                    if (
+                        pls > ls &&
+                        pls - 1 > pos &&
+                        text.slice(pls, p).trim() === ""
+                    ) {
+                        p = pls - 1;
+                    }
+                }
+
+                return { pos: p };
+            }
+
+            case "e":
+            case "E": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.wordEnd(text, p, name === "E");
+                }
+
+                return { pos: p, inc: true };
+            }
+
+            case "b":
+            case "B": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.wordBack(text, p, name === "B");
+                }
+
+                return { pos: p };
+            }
+
+            case "ge":
+            case "gE": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.wordEndBack(text, p, name === "gE");
+                }
+
+                return { pos: p, inc: true };
+            }
+
+            case "0":
+            case "<Home>":
+                return { pos: ls };
+
+            case "^":
+                return { pos: T.firstNonBlank(text, pos) };
+
+            case "_": {
+                const p = T.moveLines(text, pos, n - 1, 0);
+                return { pos: T.firstNonBlank(text, p), lw: true };
+            }
+
+            case "$":
+            case "<End>": {
+                const p = n > 1 ? T.moveLines(text, pos, n - 1, 0) : pos;
+
+                return {
+                    pos: forOp ? T.lineEnd(text, p) : T.lineLast(text, p),
+                    col: Infinity,
+                };
+            }
+
+            case "g_": {
+                let i = le;
+
+                while (i > ls && T.isBlankChar(text[i - 1])) {
+                    i--;
+                }
+
+                return { pos: Math.max(ls, i - 1), inc: i > ls };
+            }
+
+            case "gg": {
+                const s = T.lineStartOf(text, (hasCount ? n : 1) - 1);
+                return { pos: T.firstNonBlank(text, s), lw: true };
+            }
+
+            case "G": {
+                const s = hasCount
+                    ? T.lineStartOf(text, n - 1)
+                    : T.lineStart(text, len);
+                return { pos: T.firstNonBlank(text, s), lw: true };
+            }
+
+            case "f":
+            case "F":
+            case "t":
+            case "T": {
+                const p = T.findChar(text, pos, arg, name, n, false);
+
+                V.lastFind = { type: name, ch: arg };
+
+                if (p < 0) {
+                    return null;
+                }
+
+                return { pos: p, inc: name === "f" || name === "t" };
+            }
+
+            case ";":
+            case ",": {
+                const lf = V.lastFind;
+
+                if (!lf) {
+                    return null;
+                }
+
+                let type = lf.type;
+
+                if (name === ",") {
+                    type =
+                        type === type.toLowerCase()
+                            ? type.toUpperCase()
+                            : type.toLowerCase();
+                }
+
+                const p = T.findChar(text, pos, lf.ch, type, n, true);
+
+                if (p < 0) {
+                    return null;
+                }
+
+                return { pos: p, inc: type === "f" || type === "t" };
+            }
+
+            case "}": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.paragraphForward(text, p);
+                }
+
+                return { pos: p };
+            }
+
+            case "{": {
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    p = T.paragraphBack(text, p);
+                }
+
+                return { pos: p };
+            }
+
+            case "%": {
+                const p = T.matchPair(text, pos);
+                return p < 0 ? null : { pos: p, inc: true };
+            }
+
+            case "|":
+                return {
+                    pos: Math.min(ls + n - 1, forOp ? le : T.lineLast(text, pos)),
+                };
+
+            case "<CR>":
+            case "+":
+            case "-": {
+                const p = T.moveLines(text, pos, name === "-" ? -n : n, 0);
+
+                if (T.lineStart(text, p) === ls) {
+                    return null;
+                }
+
+                return { pos: T.firstNonBlank(text, p), lw: true };
+            }
+
+            case "n":
+            case "N": {
+                const s = V.lastSearch;
+
+                if (!s) {
+                    showMessage("E35: No previous search");
+                    return null;
+                }
+
+                const forward = name === "n" ? s.forward : !s.forward;
+                const p = T.search(text, s.pattern, pos, forward, n);
+
+                if (p < 0) {
+                    showMessage("E486: Pattern not found: " + s.pattern);
+                    return null;
+                }
+
+                return { pos: p };
+            }
+
+            case "*":
+            case "#": {
+                const w = T.wordObject(text, pos, false);
+                const word = text.slice(w.start, w.end);
+
+                if (!word.trim()) {
+                    return null;
+                }
+
+                const bounded = /^[\p{L}\p{N}_]+$/u.test(word);
+                const pattern = bounded
+                    ? "\\b" + escapeRegex(word) + "\\b"
+                    : escapeRegex(word);
+
+                V.lastSearch = { pattern, forward: name === "*" };
+
+                const p = T.search(text, pattern, w.start, name === "*", n);
+
+                return p < 0 ? null : { pos: p };
+            }
+        }
+
+        return null;
+    }
+
+    function motionContext(m, cmd, forOp) {
+        return {
+            text: m.text,
+            pos: V.pos,
+            count: cmd.count || 1,
+            hasCount: cmd.count !== null,
+            forOp,
+        };
+    }
+
+    function linesRange(text, pos, count) {
+        const last = T.moveLines(text, pos, count - 1, 0);
+
+        return {
+            start: T.lineStart(text, pos),
+            end: T.lineEnd(text, last),
+            lw: true,
+        };
+    }
+
+    function objectRange(text, pos, obj) {
+        const a = obj.around;
+        let r = null;
+
+        switch (obj.type) {
+            case "w":
+                r = T.wordObject(text, pos, a, false);
+                break;
+            case "W":
+                r = T.wordObject(text, pos, a, true);
+                break;
+            case '"':
+            case "'":
+            case "`":
+                r = T.quoteObject(text, pos, obj.type, a);
+                break;
+            case "(":
+            case ")":
+            case "b":
+                r = T.pairObject(text, pos, "(", ")", a);
+                break;
+            case "[":
+            case "]":
+                r = T.pairObject(text, pos, "[", "]", a);
+                break;
+            case "{":
+            case "}":
+            case "B":
+                r = T.pairObject(text, pos, "{", "}", a);
+                break;
+            case "<":
+            case ">":
+                r = T.pairObject(text, pos, "<", ">", a);
+                break;
+            case "c":
+                r = T.clozeObject(text, pos, a);
+                break;
+            case "p":
+                r = T.paragraphObject(text, pos, a);
+                return r ? { start: r.start, end: r.end, lw: true } : null;
+        }
+
+        return r ? { start: r.start, end: r.end, lw: false } : null;
+    }
+
+    function operatorRange(m, cmd) {
+        const text = m.text;
+        const pos = V.pos;
+
+        if (cmd.self) {
+            return linesRange(text, pos, cmd.count || 1);
+        }
+
+        if (cmd.obj) {
+            return objectRange(text, pos, cmd.obj);
+        }
+
+        let name = cmd.motion;
+
+        // cw on a word behaves like ce: it leaves the following space alone.
+        if (
+            cmd.op === "c" &&
+            (name === "w" || name === "W") &&
+            pos < text.length &&
+            !T.isBlankChar(text[pos])
+        ) {
+            name = name === "w" ? "e" : "E";
+
+            // ...but a count of 1 on a one-character word must not jump to
+            // the end of the *next* word.
+            const one = T.wordObject(text, pos, false, name === "E");
+
+            if ((cmd.count || 1) === 1 && one.end - 1 === pos) {
+                return { start: pos, end: pos + 1, lw: false };
+            }
+        }
+
+        const r = computeMotion(name, cmd.arg, motionContext(m, cmd, true));
+
+        if (!r) {
+            return null;
+        }
+
+        const a = Math.min(pos, r.pos);
+        const b = Math.max(pos, r.pos);
+
+        if (r.lw) {
+            return {
+                start: T.lineStart(text, a),
+                end: T.lineEnd(text, b),
+                lw: true,
+            };
+        }
+
+        return {
+            start: a,
+            end: Math.min(r.inc ? b + 1 : b, text.length),
+            lw: false,
+        };
+    }
+
+    // ======================================================================
+    // Operators
+    // ======================================================================
+
+    function deleteLines(range) {
+        const text = V.model.text;
+        const len = text.length;
+        let m;
+
+        if (range.end < len) {
+            m = deleteRange(range.start, range.end + 1);
+            V.pos = T.firstNonBlank(m.text, Math.min(range.start, m.text.length));
+        } else if (range.start > 0) {
+            m = deleteRange(range.start - 1, range.end);
+            V.pos = T.firstNonBlank(m.text, m.text.length);
+        } else {
+            m = deleteRange(range.start, range.end);
+            V.pos = 0;
+        }
+
+        return m;
+    }
+
+    function transformRange(range, fn) {
+        const text = V.model.text;
+        const runs = [];
+        let s = -1;
+
+        for (let i = range.start; i <= range.end; i++) {
+            const plain =
+                i < range.end && text[i] !== "\n" && text[i] !== ATOM;
+
+            // Replace one text node at a time so formatting is untouched.
+            if (
+                plain &&
+                s !== -1 &&
+                V.model.chars[i].n !== V.model.chars[i - 1].n
+            ) {
+                runs.push([s, i]);
+                s = i;
+            }
+
+            if (plain && s === -1) {
+                s = i;
+            } else if (!plain && s !== -1) {
+                runs.push([s, i]);
+                s = -1;
+            }
+        }
+
+        for (let r = runs.length - 1; r >= 0; r--) {
+            const [a, b] = runs[r];
+            const before = V.model.text.slice(a, b);
+            const after = fn(before);
+
+            if (after !== before) {
+                replaceRange(a, b, after);
+            }
+        }
+    }
+
+    function applyOperator(op, range, reg) {
+        const m = V.model;
+
+        switch (op) {
+            case "y": {
+                setRegister(reg, captureRange(m, range), "yank");
+
+                if (!range.lw || V.pos < range.start || V.pos > range.end) {
+                    V.pos = range.start;
+                } else if (isVisual()) {
+                    V.pos = range.start;
+                }
+
+                const lines = range.lw
+                    ? T.lineIndex(m.text, range.end) -
+                      T.lineIndex(m.text, range.start) +
+                      1
+                    : 0;
+
+                if (lines > 2) {
+                    showMessage(lines + " lines yanked");
+                }
+
+                break;
+            }
+
+            case "d":
+                if (range.start === range.end && !range.lw) {
+                    break;
+                }
+
+                setRegister(reg, captureRange(m, range), "delete");
+
+                if (range.lw) {
+                    deleteLines(range);
+                } else {
+                    deleteRange(range.start, range.end);
+                    V.pos = range.start;
+                }
+
+                break;
+
+            case "c":
+                if (range.start < range.end) {
+                    setRegister(reg, captureRange(m, range), "delete");
+                    deleteRange(range.start, range.end);
+                }
+
+                enterInsert(range.start);
+                return;
+
+            case "gu":
+                transformRange(range, (s) => s.toLowerCase());
+                V.pos = range.start;
+                break;
+
+            case "gU":
+                transformRange(range, (s) => s.toUpperCase());
+                V.pos = range.start;
+                break;
+
+            case "g~":
+                transformRange(range, T.toggleCase);
+                V.pos = range.start;
+                break;
+        }
+
+        V.mode = "normal";
+        V.pos = T.clampNormal(V.model.text, V.pos);
+    }
+
+    function insertLines(lines, htmlLines) {
+        if (htmlLines && htmlLines.some((h) => h !== null)) {
+            exec(
+                "insertHTML",
+                lines
+                    .map((line, i) =>
+                        htmlLines[i] !== null && htmlLines[i] !== undefined
+                            ? htmlLines[i]
+                            : escapeHtml(line),
+                    )
+                    .join("<br>"),
             );
-        },
+        } else {
+            typeText(lines.join("\n"));
+        }
+    }
 
-        cls: function (el) {
-            if (!el || typeof el.className !== "string") {
-                return "";
+    function paste(before, count, regName) {
+        const r = getRegister(regName);
+
+        if (!r || !r.text) {
+            showMessage("E353: Nothing in register " + (regName || '"'));
+            return;
+        }
+
+        const m = V.model;
+        const text = m.text;
+        const pos = V.pos;
+
+        if (r.linewise) {
+            const one = r.text.replace(/\n$/, "").split("\n");
+            const oneHtml =
+                r.htmlLines && r.htmlLines.length === one.length
+                    ? r.htmlLines
+                    : null;
+            let lines = [];
+            let htmlLines = oneHtml ? [] : null;
+
+            for (let i = 0; i < count; i++) {
+                lines = lines.concat(one);
+
+                if (htmlLines) {
+                    htmlLines = htmlLines.concat(oneHtml);
+                }
             }
 
-            return el.className;
-        },
+            if (before) {
+                const ls = T.lineStart(text, pos);
 
-        installStyle: function () {
-            let style = document.getElementById("anki-vim-runtime-style");
+                setSel(m, ls, ls);
+                insertLines(lines, htmlLines);
+                exec("insertLineBreak");
+                V.pos = T.firstNonBlank(remodel().text, ls);
+            } else {
+                const le = T.lineEnd(text, pos);
 
-            if (!style) {
-                style = document.createElement("style");
-                style.id = "anki-vim-runtime-style";
-                document.head.appendChild(style);
+                setSel(m, le, le);
+                exec("insertLineBreak");
+                insertLines(lines, htmlLines);
+                V.pos = T.firstNonBlank(remodel().text, le + 1);
             }
 
-            style.textContent = `
-                #anki-vim-status {
-                    position: fixed;
-                    left: 50%;
-                    bottom: 0px;
-                    transform: translateX(-50%);
-                    z-index: 2147483647;
+            return;
+        }
 
-                    min-width: 150px;
-                    padding: 7px 16px;
+        const lineEmpty = T.lineEnd(text, pos) === T.lineStart(text, pos);
+        const at = before || lineEmpty ? pos : pos + 1;
 
-                    border: 1px solid rgba(255, 255, 255, 0.18);
-                    border-radius: 999px;
+        setSel(m, at, at);
 
-                    background: rgba(28, 28, 32, 0.88);
-                    color: #f4f4f5;
+        for (let i = 0; i < count; i++) {
+            if (r.html) {
+                exec("insertHTML", r.html);
+            } else {
+                typeText(r.text);
+            }
+        }
 
-                    font-family:
-                        -apple-system,
-                        BlinkMacSystemFont,
-                        "Segoe UI",
-                        sans-serif;
-                    font-size: 13px;
-                    font-weight: 600;
-                    letter-spacing: 0.08em;
-                    text-align: center;
+        const m2 = remodel();
+        const caret = m2.caret === null ? at + r.text.length * count : m2.caret;
 
-                    box-shadow:
-                        0 8px 22px rgba(0, 0, 0, 0.22),
-                        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        V.pos = Math.max(at, caret - 1);
+    }
 
-                    user-select: none;
-                    pointer-events: none;
+    function joinLines(count) {
+        const times = Math.max(1, count - 1);
 
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
+        for (let i = 0; i < times; i++) {
+            const text = V.model.text;
+            const le = T.lineEnd(text, V.pos);
+
+            if (le >= text.length) {
+                break;
+            }
+
+            let next = le + 1;
+
+            while (
+                next < text.length &&
+                (text[next] === " " || text[next] === "\t")
+            ) {
+                next++;
+            }
+
+            const nextEmpty = next >= text.length || text[next] === "\n";
+            const needSpace =
+                !nextEmpty &&
+                le > T.lineStart(text, V.pos) &&
+                !T.isBlankChar(text[le - 1]);
+
+            replaceRange(le, next, needSpace ? " " : "");
+            V.pos = needSpace ? le : Math.max(T.lineStart(text, V.pos), le - 1);
+        }
+    }
+
+    // ======================================================================
+    // Insert mode
+    // ======================================================================
+
+    function enterInsert(caret) {
+        const m = V.model || remodel();
+
+        if (!m) {
+            return;
+        }
+
+        beginChange();
+        caret = T.clamp(caret, 0, m.text.length);
+        setSel(m, caret, caret);
+        V.mode = "insert";
+        V.insert = { text: m.text, pos: caret };
+        V.escapeArmed = 0;
+        updateStatus();
+        queueDraw();
+    }
+
+    function exitInsert() {
+        if (V.mode !== "insert") {
+            return;
+        }
+
+        const field = activeField() || V.field;
+
+        V.field = field;
+
+        const m = remodel();
+        const session = V.insert;
+        let inserted = "";
+
+        V.insert = null;
+        V.mode = "normal";
+
+        if (m) {
+            const caret = m.caret === null ? V.pos : m.caret;
+
+            if (
+                session &&
+                caret >= session.pos &&
+                m.text.length - session.text.length === caret - session.pos
+            ) {
+                inserted = m.text.slice(session.pos, caret);
+            }
+
+            V.pos = caret > T.lineStart(m.text, caret) ? caret - 1 : caret;
+            V.pos = T.clampNormal(m.text, V.pos);
+            V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+        }
+
+        endChange();
+
+        if (V.pendingDot && !V.replaying) {
+            V.lastChange = { keys: V.pendingDot, text: inserted };
+        }
+
+        V.pendingDot = null;
+        placeCursor();
+        updateStatus();
+    }
+
+    // ======================================================================
+    // Command execution
+    // ======================================================================
+
+    // Shorthand commands expressed as operator + motion.
+    const SYNONYMS = {
+        x: ["d", "l"],
+        "<Del>": ["d", "l"],
+        X: ["d", "h"],
+        s: ["c", "l"],
+        S: ["c", "c"],
+        D: ["d", "$"],
+        C: ["c", "$"],
+        Y: ["y", "y"],
+    };
+
+    function setModeNormal() {
+        V.mode = "normal";
+    }
+
+    function moveCursor(r) {
+        const m = V.model;
+
+        V.pos = isVisual()
+            ? T.clamp(r.pos, 0, Math.max(0, m.text.length - 1))
+            : T.clampNormal(m.text, r.pos);
+
+        if (isVisual()) {
+            V.pos = T.clampNormal(m.text, V.pos);
+        }
+
+        if (r.col !== undefined) {
+            V.desiredCol = r.col;
+        } else if (!r.keepCol) {
+            V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+        }
+    }
+
+    function executeNormal(cmd, keys) {
+        let m = V.model;
+        const count = cmd.count || 1;
+
+        if (cmd.action && SYNONYMS[cmd.action]) {
+            const [op, motion] = SYNONYMS[cmd.action];
+
+            cmd = Object.assign({}, cmd, {
+                action: null,
+                op,
+                motion: op === motion ? null : motion,
+                self: op === motion,
+            });
+        }
+
+        if (cmd.op) {
+            const range = operatorRange(m, cmd);
+
+            if (!range) {
+                return;
+            }
+
+            const mutating = cmd.op !== "y";
+
+            if (mutating) {
+                beginChange();
+                V.pendingDot = keys;
+            }
+
+            applyOperator(cmd.op, range, cmd.reg);
+            V.desiredCol = V.pos - T.lineStart(V.model.text, V.pos);
+            return;
+        }
+
+        if (cmd.motion) {
+            const r = computeMotion(
+                cmd.motion,
+                cmd.arg,
+                motionContext(m, cmd, false),
+            );
+
+            if (r) {
+                moveCursor(r);
+            }
+
+            return;
+        }
+
+        const text = m.text;
+        const pos = V.pos;
+
+        switch (cmd.action) {
+            case "<Esc>":
+            case "<C-[>":
+                return;
+
+            case "i":
+                V.pendingDot = keys;
+                enterInsert(pos);
+                return;
+
+            case "a":
+                V.pendingDot = keys;
+                enterInsert(
+                    T.lineEnd(text, pos) > T.lineStart(text, pos)
+                        ? pos + 1
+                        : pos,
+                );
+                return;
+
+            case "I":
+                V.pendingDot = keys;
+                enterInsert(T.firstNonBlank(text, pos));
+                return;
+
+            case "A":
+                V.pendingDot = keys;
+                enterInsert(T.lineEnd(text, pos));
+                return;
+
+            case "o": {
+                const le = T.lineEnd(text, pos);
+
+                V.pendingDot = keys;
+                beginChange();
+                setSel(m, le, le);
+                exec("insertLineBreak");
+                m = remodel();
+                enterInsert(m.caret === null ? le + 1 : m.caret);
+                return;
+            }
+
+            case "O": {
+                const ls = T.lineStart(text, pos);
+
+                V.pendingDot = keys;
+                beginChange();
+                setSel(m, ls, ls);
+                exec("insertLineBreak");
+                remodel();
+                enterInsert(ls);
+                return;
+            }
+
+            case "p":
+            case "P":
+                beginChange();
+                V.pendingDot = keys;
+                paste(cmd.action === "P", count, cmd.reg);
+                return;
+
+            case "u":
+                undoRedo(true, count);
+                return;
+
+            case "<C-r>":
+                undoRedo(false, count);
+                return;
+
+            case ".":
+                repeatLastChange();
+                return;
+
+            case "v":
+            case "V":
+                V.vAnchor = pos;
+                V.mode = cmd.action === "v" ? "visual" : "vline";
+                return;
+
+            case "gv":
+                if (V.lastVisual) {
+                    V.vAnchor = T.clamp(V.lastVisual.anchor, 0, text.length);
+                    V.pos = T.clamp(V.lastVisual.pos, 0, text.length);
+                    V.mode = V.lastVisual.mode;
                 }
 
-                body[data-anki-vim-mode="normal"] #anki-vim-status {
-                    background: rgba(32, 36, 44, 0.9);
-                    color: #f4f4f5;
+                return;
+
+            case "r": {
+                const end = pos + count;
+
+                if (
+                    end > T.lineEnd(text, pos) ||
+                    text.slice(pos, end).includes(ATOM)
+                ) {
+                    return;
                 }
 
-                body[data-anki-vim-mode="insert"] #anki-vim-status {
-                    background: rgba(24, 95, 64, 0.92);
-                    color: #ecfdf5;
+                beginChange();
+                V.pendingDot = keys;
+                replaceRange(pos, end, cmd.arg.repeat(count));
+                V.pos = end - 1;
+                return;
+            }
+
+            case "~": {
+                const end = Math.min(pos + count, T.lineEnd(text, pos));
+
+                if (end <= pos) {
+                    return;
                 }
 
-                body[data-anki-vim-mode="visual"] #anki-vim-status {
-                    background: rgba(88, 60, 150, 0.92);
-                    color: #f5f3ff;
+                beginChange();
+                V.pendingDot = keys;
+                transformRange({ start: pos, end }, T.toggleCase);
+                V.pos = Math.min(end, T.lineLast(V.model.text, pos));
+                return;
+            }
+
+            case "J":
+            case "K":
+                if (config.shift_jk_fields) {
+                    moveField(cmd.action === "J" ? 1 : -1);
+                    return;
                 }
 
-                #anki-vim-debug {
-                    position: fixed;
-                    right: 14px;
-                    bottom: 14px;
-                    z-index: 2147483647;
-
-                    max-width: 900px;
-                    max-height: 520px;
-                    overflow: auto;
-
-                    padding: 10px 12px;
-                    border: 1px solid rgba(255, 255, 255, 0.14);
-                    border-radius: 12px;
-
-                    background: rgba(17, 17, 20, 0.92);
-                    color: #eeeeee;
-
-                    font-family:
-                        ui-monospace,
-                        SFMono-Regular,
-                        Menlo,
-                        Consolas,
-                        "Liberation Mono",
-                        monospace;
-                    font-size: 11px;
-                    line-height: 1.45;
-                    white-space: pre-wrap;
-                    user-select: text;
-
-                    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
-
-                    backdrop-filter: blur(10px);
-                    -webkit-backdrop-filter: blur(10px);
+                if (cmd.action === "K") {
+                    return;
                 }
 
-                .anki-vim-field-active {
-                    outline: none !important;
-                    outline-offset: 0 !important;
+            // fallthrough: J joins lines when not used for field navigation
+            case "gJ":
+                beginChange();
+                V.pendingDot = keys;
+                joinLines(count);
+                return;
+
+            case ":":
+                openCmdline(":", "");
+                return;
+
+            case "/":
+            case "?":
+                openCmdline(cmd.action, "");
+                return;
+
+            case "ZZ":
+                sendPython({ cmd: "wq" });
+                return;
+
+            case "ZQ":
+                sendPython({ cmd: "q" });
+                return;
+        }
+    }
+
+    function executeVisual(cmd) {
+        const m = V.model;
+        const text = m.text;
+
+        if (cmd.motion) {
+            const r = computeMotion(
+                cmd.motion,
+                cmd.arg,
+                motionContext(m, cmd, false),
+            );
+
+            if (r) {
+                moveCursor(r);
+            }
+
+            return;
+        }
+
+        if (cmd.obj) {
+            const r = objectRange(text, V.pos, cmd.obj);
+
+            if (!r || r.end <= r.start) {
+                return;
+            }
+
+            if (r.lw) {
+                V.mode = "vline";
+            }
+
+            const single = V.vAnchor === V.pos;
+
+            V.vAnchor = single ? r.start : Math.min(V.vAnchor, r.start);
+            V.pos = single ? r.end - 1 : Math.max(V.pos, r.end - 1);
+            return;
+        }
+
+        const range = visualBounds(m);
+        const remember = () => {
+            V.lastVisual = { anchor: V.vAnchor, pos: V.pos, mode: V.mode };
+        };
+        const linewise = () => ({
+            start: T.lineStart(text, range.start),
+            end: T.lineEnd(text, Math.max(range.start, range.end - (range.lw ? 0 : 1))),
+            lw: true,
+        });
+        const run = (op, r) => {
+            remember();
+
+            if (op !== "y") {
+                beginChange();
+            }
+
+            applyOperator(op, r, cmd.reg);
+
+            if (V.mode !== "insert") {
+                setModeNormal();
+            }
+        };
+
+        switch (cmd.action) {
+            case "<Esc>":
+            case "<C-[>":
+                remember();
+                setModeNormal();
+                V.pos = T.clampNormal(text, V.pos);
+                return;
+
+            case "v":
+            case "V": {
+                const target = cmd.action === "v" ? "visual" : "vline";
+
+                if (V.mode === target) {
+                    remember();
+                    setModeNormal();
+                    V.pos = T.clampNormal(text, V.pos);
+                } else {
+                    V.mode = target;
                 }
 
-                .rich-text-editable,
-                [contenteditable="true"],
-                [contenteditable="plaintext-only"],
-                textarea,
-                input {
-                    caret-color: auto !important;
+                return;
+            }
+
+            case "o": {
+                const a = V.vAnchor;
+
+                V.vAnchor = V.pos;
+                V.pos = a;
+                return;
+            }
+
+            case "d":
+            case "x":
+            case "<Del>":
+                run("d", range);
+                return;
+
+            case "X":
+            case "D":
+                run("d", linewise());
+                return;
+
+            case "y":
+                run("y", range);
+                return;
+
+            case "Y":
+                run("y", linewise());
+                return;
+
+            case "c":
+            case "s":
+                run("c", range);
+                return;
+
+            case "C":
+            case "S":
+            case "R":
+                run("c", linewise());
+                return;
+
+            case "u":
+            case "gu":
+                run("gu", range);
+                return;
+
+            case "U":
+            case "gU":
+                run("gU", range);
+                return;
+
+            case "~":
+            case "g~":
+                run("g~", range);
+                return;
+
+            case "J":
+            case "gJ": {
+                const lines =
+                    T.lineIndex(text, range.end) -
+                    T.lineIndex(text, range.start) +
+                    1;
+
+                remember();
+                beginChange();
+                setModeNormal();
+                V.pos = range.start;
+                joinLines(Math.max(2, lines));
+                return;
+            }
+
+            case "r": {
+                remember();
+                beginChange();
+                setModeNormal();
+                transformRange(range, (s) => cmd.arg.repeat(s.length));
+                V.pos = range.start;
+                return;
+            }
+
+            case "p":
+            case "P": {
+                const r = getRegister(cmd.reg);
+
+                if (!r || !r.text) {
+                    showMessage("E353: Nothing in register");
+                    return;
                 }
 
-                #anki-vim-block-cursor {
-                    position: fixed;
-                    z-index: 2147483647;
-                    pointer-events: none;
-                    /*
-                      Reverse-video caret: a WHITE source under difference
-                      blending inverts whatever is behind it, so the block is
-                      visible on both light fields and dark text/themes. A black
-                      source here would be a no-op (invisible).
-                    */
-                    background: rgba(255, 255, 255, 0.95);
-                    mix-blend-mode: difference;
-                    width: 9px;
-                    height: 18px;
-                    display: none;
+                remember();
+                beginChange();
+                setModeNormal();
+
+                const removed = captureRange(m, range);
+
+                if (range.lw) {
+                    // Replace the lines but keep one (empty) line to paste on.
+                    deleteRange(range.start, range.end);
+                    V.pos = range.start;
+
+                    if (r.linewise) {
+                        const lines = r.text.replace(/\n$/, "").split("\n");
+
+                        setSel(V.model, range.start, range.start);
+                        insertLines(
+                            lines,
+                            r.htmlLines && r.htmlLines.length === lines.length
+                                ? r.htmlLines
+                                : null,
+                        );
+                        V.pos = T.firstNonBlank(remodel().text, range.start);
+                    } else {
+                        paste(true, cmd.count || 1, cmd.reg);
+                    }
+                } else {
+                    deleteRange(range.start, range.end);
+                    V.pos = range.start;
+
+                    if (r.linewise) {
+                        // Linewise text into a charwise hole: own line(s).
+                        setSel(V.model, range.start, range.start);
+                        exec("insertLineBreak");
+                        remodel();
+                        V.pos = range.start;
+                        paste(false, cmd.count || 1, cmd.reg);
+                    } else {
+                        paste(true, cmd.count || 1, cmd.reg);
+                    }
                 }
 
-                #anki-vim-line-cursor,
-                #anki-vim-line-highlight {
-                    display: none !important;
+                setRegister(null, removed, "delete");
+                return;
+            }
+
+            case ":":
+                remember();
+                openCmdline(":", "'<,'>");
+                return;
+        }
+    }
+
+    function execute(cmd, keys) {
+        const m = sync();
+
+        if (!m) {
+            return;
+        }
+
+        const undoBefore = V.undo.length;
+
+        V.pendingDot = null;
+
+        if (isVisual()) {
+            executeVisual(cmd);
+        } else {
+            executeNormal(cmd, keys);
+        }
+
+        if (V.mode !== "insert") {
+            if (V.model) {
+                V.pos = isVisual()
+                    ? T.clamp(V.pos, 0, V.model.text.length)
+                    : T.clampNormal(V.model.text, V.pos);
+            }
+
+            const changed = endChange() || V.undo.length > undoBefore;
+
+            if (changed && V.pendingDot && !V.replaying) {
+                V.lastChange = { keys: V.pendingDot, text: "" };
+            }
+
+            V.pendingDot = null;
+
+            if (V.field && !V.cmdline) {
+                remodel();
+                placeCursor();
+            }
+        }
+
+        updateStatus();
+    }
+
+    function repeatLastChange() {
+        const last = V.lastChange;
+
+        if (!last || V.replaying) {
+            return;
+        }
+
+        V.replaying = true;
+
+        try {
+            beginChange();
+
+            for (const key of last.keys) {
+                feedKey(key);
+            }
+
+            if (V.mode === "insert") {
+                if (last.text) {
+                    typeText(last.text);
                 }
-            `;
-        },
 
-        // The editable lives in an open shadow root, so document ::selection
-        // CSS can't reach it. Inject a tiny stylesheet into each field's shadow
-        // root so the normal-mode block (a 1-char selection of the glyph under
-        // the caret) is drawn as a solid reverse-video block cursor.
-        installShadowCaretStyle: function () {
-            const fields = this.fields();
+                exitInsert();
+            }
+        } finally {
+            V.replaying = false;
+        }
+    }
 
-            for (const field of fields) {
-                const root = this.shadowRootFor(field);
+    function feedKey(key) {
+        if (key === "<Esc>" || key === "<C-[>") {
+            if (V.keys.length > 0) {
+                V.keys = [];
+                updateStatus();
+                return;
+            }
+        }
 
-                if (!root || !root.querySelector) {
+        V.keys.push(key);
+
+        const result = parse(V.keys, isVisual());
+
+        if (result.status === "incomplete") {
+            updateStatus();
+            return;
+        }
+
+        const keys = V.keys;
+
+        V.keys = [];
+
+        if (result.status === "done") {
+            execute(result.cmd, keys);
+        } else {
+            updateStatus();
+        }
+    }
+
+    // ======================================================================
+    // Command line (":" commands and "/" search)
+    // ======================================================================
+
+    function openCmdline(type, text) {
+        V.cmdline = { type, text };
+        updateStatus();
+        queueDraw();
+    }
+
+    function closeCmdline() {
+        V.cmdline = null;
+
+        if (V.field) {
+            remodel();
+            placeCursor();
+        }
+
+        updateStatus();
+    }
+
+    function cmdlineKey(key) {
+        const c = V.cmdline;
+
+        if (key === "<Esc>" || key === "<C-[>" || key === "<C-c>") {
+            if (isVisual()) {
+                setModeNormal();
+            }
+
+            closeCmdline();
+        } else if (key === "<CR>") {
+            V.cmdline = null;
+            runCmdline(c.type, c.text);
+
+            if (!V.cmdline) {
+                closeCmdline();
+            }
+        } else if (key === "<BS>") {
+            if (c.text === "") {
+                if (isVisual()) {
+                    setModeNormal();
+                }
+
+                closeCmdline();
+            } else {
+                c.text = c.text.slice(0, -1);
+                updateStatus();
+            }
+        } else if (key === "<C-u>") {
+            c.text = "";
+            updateStatus();
+        } else if (key === "<C-v>") {
+            c.text += (V.clipboardText || "").split("\n")[0];
+            updateStatus();
+        } else if (key.length === 1) {
+            c.text += key;
+            updateStatus();
+        }
+    }
+
+    // Parses a leading line range. Returns { l1, l2, rest } (0-based lines).
+    function parseLineRange(input, m) {
+        const text = m.text;
+        const total = T.lineCount(text);
+        const current = T.lineIndex(text, V.pos);
+
+        if (input.startsWith("%")) {
+            return { l1: 0, l2: total - 1, rest: input.slice(1), given: true };
+        }
+
+        if (input.startsWith("'<,'>")) {
+            const b = visualBounds(m);
+            const lv = V.lastVisual;
+            const lo = lv ? Math.min(lv.anchor, lv.pos) : b.start;
+            const hi = lv ? Math.max(lv.anchor, lv.pos) : b.end;
+
+            return {
+                l1: T.lineIndex(text, lo),
+                l2: T.lineIndex(text, hi),
+                rest: input.slice(5),
+                given: true,
+            };
+        }
+
+        const address = (s) => {
+            const match = /^(\d+|\.|\$)/.exec(s);
+
+            if (!match) {
+                return null;
+            }
+
+            const tok = match[1];
+            const line =
+                tok === "." ? current : tok === "$" ? total - 1 : parseInt(tok, 10) - 1;
+
+            return { line: T.clamp(line, 0, total - 1), len: tok.length };
+        };
+
+        const a = address(input);
+
+        if (!a) {
+            return { l1: current, l2: current, rest: input, given: false };
+        }
+
+        let rest = input.slice(a.len);
+
+        if (rest.startsWith(",")) {
+            const b = address(rest.slice(1));
+
+            if (b) {
+                return {
+                    l1: Math.min(a.line, b.line),
+                    l2: Math.max(a.line, b.line),
+                    rest: rest.slice(1 + b.len),
+                    given: true,
+                };
+            }
+        }
+
+        return { l1: a.line, l2: a.line, rest, given: true };
+    }
+
+    function substitute(m, l1, l2, spec) {
+        const delim = spec[0];
+        const parts = [];
+        let cur = "";
+
+        for (let i = 1; i < spec.length; i++) {
+            if (spec[i] === "\\" && spec[i + 1] === delim) {
+                cur += delim;
+                i++;
+            } else if (spec[i] === delim && parts.length < 2) {
+                parts.push(cur);
+                cur = "";
+            } else {
+                cur += spec[i];
+            }
+        }
+
+        parts.push(cur);
+
+        const pattern = parts[0] || (V.lastSearch ? V.lastSearch.pattern : "");
+        const flags = parts.length > 2 ? parts[2] : "";
+
+        if (!pattern) {
+            showMessage("E35: No previous regular expression");
+            return;
+        }
+
+        V.lastSearch = { pattern, forward: true };
+
+        // vim replacement syntax -> JS: \1 => $1, & => $&, \r / \n => newline.
+        const replacement = (parts[1] || "")
+            .replace(/\$/g, "$$$$")
+            .replace(/\\([0-9])/g, "$$$1")
+            .replace(/\\r|\\n/g, "\n")
+            .replace(/\\&/g, "\u0000")
+            .replace(/&/g, "$$&")
+            .replace(/\u0000/g, "&");
+
+        const text = m.text;
+        const start = T.lineStartOf(text, l1);
+        const end = T.lineEnd(text, T.lineStartOf(text, l2));
+        const region = text.slice(start, end);
+        let regex = T.makeRegex(pattern, "g");
+
+        if (flags.includes("i")) {
+            regex = new RegExp(regex.source, regex.flags.replace("i", "") + "i");
+        }
+
+        const single = new RegExp(regex.source, regex.flags.replace("g", ""));
+        const edits = [];
+        const seenLines = new Set();
+
+        for (const match of T.allMatches(region, regex)) {
+            const line = T.lineIndex(region, match.start);
+
+            if (!flags.includes("g")) {
+                if (seenLines.has(line)) {
                     continue;
                 }
 
-                if (root.querySelector("#anki-vim-caret-style")) {
-                    continue;
-                }
-
-                try {
-                    const style = document.createElement("style");
-                    style.id = "anki-vim-caret-style";
-                    // The normal-mode block cursor is a 1-char selection.
-                    // Style it as reverse video using Anki's own theme colors
-                    // (--fg / --canvas, which flip in night mode and inherit
-                    // through the shadow boundary). Fall back to the system
-                    // Canvas colors, which also adapt to color-scheme. This
-                    // keeps the block visible on light AND dark themes.
-                    style.textContent =
-                        "::selection{" +
-                        "background-color:var(--fg,CanvasText);" +
-                        "color:var(--canvas,Canvas);}";
-                    root.appendChild(style);
-                } catch (error) {}
-            }
-        },
-
-        cleanupOldLineCursor: function () {
-            const oldCursor = document.getElementById("anki-vim-line-cursor");
-            const oldHighlight = document.getElementById(
-                "anki-vim-line-highlight",
-            );
-
-            if (oldCursor) {
-                oldCursor.remove();
+                seenLines.add(line);
             }
 
-            if (oldHighlight) {
-                oldHighlight.remove();
-            }
-        },
+            const found = region.slice(match.start, match.end);
 
-        makeStatus: function () {
-            let el = document.getElementById("anki-vim-status");
+            edits.push({
+                a: start + match.start,
+                b: start + match.end,
+                text: found.replace(single, replacement),
+            });
+        }
+
+        if (edits.length === 0) {
+            showMessage("E486: Pattern not found: " + pattern);
+            return;
+        }
+
+        beginChange();
+
+        for (let i = edits.length - 1; i >= 0; i--) {
+            replaceRange(edits[i].a, edits[i].b, edits[i].text);
+        }
+
+        V.pos = T.firstNonBlank(V.model.text, edits[edits.length - 1].a);
+        endChange();
+        showMessage(
+            edits.length +
+                " substitution" +
+                (edits.length === 1 ? "" : "s"),
+        );
+    }
+
+    function runCmdline(type, input) {
+        const m = sync();
+
+        if (!m) {
+            return;
+        }
+
+        if (type === "/" || type === "?") {
+            const forward = type === "/";
+            const pattern =
+                input || (V.lastSearch ? V.lastSearch.pattern : "");
+
+            if (!pattern) {
+                return;
+            }
+
+            V.lastSearch = { pattern, forward };
+
+            const p = T.search(m.text, pattern, V.pos, forward, 1);
+
+            if (p < 0) {
+                showMessage("E486: Pattern not found: " + pattern);
+            } else {
+                V.pos = T.clampNormal(m.text, p);
+                V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+            }
+
+            return;
+        }
+
+        const wasVisual = isVisual();
+        const range = parseLineRange(input.trim(), m);
+        const rest = range.rest.trim();
+
+        if (wasVisual) {
+            setModeNormal();
+            V.pos = T.clampNormal(m.text, V.pos);
+        }
+
+        if (rest === "") {
+            if (range.given) {
+                V.pos = T.firstNonBlank(m.text, T.lineStartOf(m.text, range.l2));
+            }
+
+            return;
+        }
+
+        const match = /^([a-zA-Z]+)(!?)\s*(.*)$/.exec(rest);
+        const name = match ? match[1] : rest;
+        const sub = /^s(?:ubstitute)?([^a-zA-Z0-9\s].*)$/.exec(rest);
+
+        if (sub) {
+            substitute(m, range.l1, range.l2, sub[1]);
+            return;
+        }
+
+        const lineRange = () => ({
+            start: T.lineStartOf(m.text, range.l1),
+            end: T.lineEnd(m.text, T.lineStartOf(m.text, range.l2)),
+            lw: true,
+        });
+
+        switch (name) {
+            case "w":
+            case "write":
+                sendPython({ cmd: "w" });
+                return;
+
+            case "wq":
+            case "x":
+            case "xit":
+                sendPython({ cmd: "wq" });
+                return;
+
+            case "q":
+            case "quit":
+            case "close":
+                sendPython({ cmd: "q" });
+                return;
+
+            case "d":
+            case "delete":
+                beginChange();
+                applyOperator("d", lineRange(), null);
+                endChange();
+                return;
+
+            case "y":
+            case "yank":
+                applyOperator("y", lineRange(), null);
+                return;
+
+            case "noh":
+            case "nohlsearch":
+                return;
+
+            case "u":
+            case "undo":
+                undoRedo(true, 1);
+                return;
+
+            case "red":
+            case "redo":
+                undoRedo(false, 1);
+                return;
+
+            case "reg":
+            case "registers":
+            case "di":
+            case "display": {
+                const names = Object.keys(V.regs).sort();
+
+                showMessage(
+                    names.length
+                        ? names
+                              .map(
+                                  (n) =>
+                                      '"' +
+                                      n +
+                                      " " +
+                                      V.regs[n].text
+                                          .replace(/\n/g, "^J")
+                                          .slice(0, 24),
+                              )
+                              .join("   ")
+                        : "No registers",
+                    6000,
+                );
+                return;
+            }
+
+            case "h":
+            case "help":
+                sendPython({ cmd: "help" });
+                return;
+        }
+
+        showMessage("E492: Not an editor command: " + rest);
+    }
+
+    // ======================================================================
+    // Status line and block cursor
+    // ======================================================================
+
+    const MODE_LABELS = {
+        normal: "NORMAL",
+        insert: "INSERT",
+        visual: "VISUAL",
+        vline: "V-LINE",
+    };
+
+    function showMessage(text, ms) {
+        V.message = text;
+        clearTimeout(V.messageTimer);
+        V.messageTimer = setTimeout(() => {
+            V.message = "";
+            updateStatus();
+        }, ms || 2500);
+        updateStatus();
+    }
+
+    function updateStatus() {
+        if (!document.body) {
+            return;
+        }
+
+        document.body.dataset.ankiVimMode = V.mode;
+
+        let el = V.statusEl;
+
+        if (!el || !el.isConnected) {
+            el = document.getElementById("anki-vim-status");
 
             if (!el) {
                 el = document.createElement("div");
@@ -249,3126 +3123,602 @@
                 document.body.appendChild(el);
             }
 
-            this.statusEl = el;
-            this.updateStatus();
-        },
+            V.statusEl = el;
+        }
 
-        updateStatus: function () {
-            if (!this.statusEl) {
-                return;
+        el.style.display = config.show_status ? "" : "none";
+        el.classList.toggle("anki-vim-cmdline", !!V.cmdline);
+        el.classList.toggle("anki-vim-message", !V.cmdline && !!V.message);
+
+        if (V.cmdline) {
+            el.textContent = V.cmdline.type + V.cmdline.text + "█";
+        } else if (V.message) {
+            el.textContent = V.message;
+        } else {
+            const pending = V.keys.join("");
+
+            el.textContent =
+                MODE_LABELS[V.mode] + (pending ? "  " + pending : "");
+        }
+    }
+
+    function cursorRect(m, pos) {
+        const text = m.text;
+
+        if (pos < text.length && text[pos] !== "\n") {
+            const c = m.chars[pos];
+
+            if (c.k === "a") {
+                return c.n.getBoundingClientRect();
             }
 
-            if (this.pendingOperator) {
-                this.statusEl.textContent =
-                    "-- " + this.pendingOperator.toUpperCase() + " --";
-            } else {
-                this.statusEl.textContent =
-                    "-- " + this.mode.toUpperCase() + " --";
-            }
-        },
+            if (c.k === "t") {
+                const range = document.createRange();
 
-        setMode: function (mode) {
-            this.mode = mode;
-            document.body.dataset.ankiVimMode = mode;
-            this.syncPythonMode(mode);
+                range.setStart(c.n, c.o);
+                range.setEnd(c.n, c.o + 1);
 
-            if (mode !== "normal") {
-                this.pendingOperator = null;
-            }
+                const rects = range.getClientRects();
 
-            this.updateStatus();
-            this.ensureField();
-            this.refreshFieldOutline();
-
-            this.installShadowCaretStyle();
-            this.removeBlockCursor();
-
-            if (mode === "normal") {
-                // Show the block (1-char selection) once focus settles.
-                this.placeBlockCaret();
-                setTimeout(() => this.placeBlockCaret(), 0);
-            } else {
-                // Collapse the block so insert/visual start from a plain caret
-                // and typing doesn't overwrite the highlighted character.
-                this.collapseBlockToCursor();
-            }
-
-            this.updateDebugIfVisible();
-        },
-
-        installKeyHandler: function () {
-            if (window.ankiVimKeyHandlerInstalledV37) {
-                return;
-            }
-
-            window.ankiVimKeyHandlerInstalledV37 = true;
-
-            document.addEventListener(
-                "keydown",
-                function (event) {
-                    return window.ankiVim.handleKey(event);
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "keyup",
-                function (event) {
-                    if (!window.ankiVim) {
-                        return true;
+                for (const r of rects) {
+                    if (r.width > 0 && r.height > 0) {
+                        return r;
                     }
-
-                    if (
-                        window.ankiVim.mode === "visual" &&
-                        (event.key === "Escape" || event.code === "Escape")
-                    ) {
-                        event.preventDefault();
-                        event.stopImmediatePropagation();
-                        event.stopPropagation();
-                        window.ankiVim.lastAction =
-                            "visual -> normal by keyup escape";
-                        window.ankiVim.exitVisualMode(false);
-                        return false;
-                    }
-
-                    if (window.ankiVim.mode === "insert") {
-                        window.ankiVim.scheduleSafeLineSync(
-                            "insert keyup " + event.key,
-                        );
-                    }
-
-                    return true;
-                },
-                true,
-            );
-        },
-
-        installCursorTrackers: function () {
-            if (window.ankiVimCursorTrackersInstalledV37) {
-                return;
-            }
-
-            window.ankiVimCursorTrackersInstalledV37 = true;
-
-            document.addEventListener(
-                "mousedown",
-                function (event) {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.updateFieldFromPointerEvent(event);
-                    window.ankiVim.updatePointerLineAndApply(event);
-                    window.ankiVim.updateDebugIfVisible();
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "mouseup",
-                function (event) {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.updateFieldFromPointerEvent(event);
-                    window.ankiVim.updatePointerLineAndApply(event);
-                    window.ankiVim.scheduleSafeLineSync("mouseup");
-
-                    if (window.ankiVim.mode === "normal") {
-                        window.ankiVim.drawBlockCursorSoon();
-                    }
-
-                    window.ankiVim.updateDebugIfVisible();
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "click",
-                function (event) {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.updateFieldFromPointerEvent(event);
-                    window.ankiVim.updatePointerLineAndApply(event);
-                    window.ankiVim.scheduleSafeLineSync("click");
-                    window.ankiVim.updateDebugIfVisible();
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "selectionchange",
-                function () {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.updateFieldIndexFromSelection();
-                    window.ankiVim.scheduleSafeLineSync("selectionchange");
-
-                    if (window.ankiVim.mode === "normal") {
-                        window.ankiVim.drawBlockCursorSoon();
-                    }
-
-                    window.ankiVim.updateDebugIfVisible();
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "focusin",
-                function () {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.updateFieldIndexFromActiveElement();
-                    window.ankiVim.scheduleSafeLineSync("focusin");
-                    window.ankiVim.updateDebugIfVisible();
-                },
-                true,
-            );
-
-            document.addEventListener(
-                "input",
-                function () {
-                    if (!window.ankiVim) {
-                        return;
-                    }
-
-                    window.ankiVim.scheduleSafeLineSync("input");
-                },
-                true,
-            );
-
-            window.addEventListener(
-                "scroll",
-                function () {
-                    if (window.ankiVim && window.ankiVim.mode === "normal") {
-                        window.ankiVim.drawBlockCursorSoon();
-                    }
-                },
-                true,
-            );
-
-            window.addEventListener(
-                "resize",
-                function () {
-                    if (window.ankiVim && window.ankiVim.mode === "normal") {
-                        window.ankiVim.drawBlockCursorSoon();
-                    }
-                },
-                true,
-            );
-        },
-
-        handleKey: function (event) {
-            const isShiftJ =
-                event.code === "KeyJ" &&
-                event.shiftKey &&
-                !event.ctrlKey &&
-                !event.altKey &&
-                !event.metaKey;
-
-            const isShiftK =
-                event.code === "KeyK" &&
-                event.shiftKey &&
-                !event.ctrlKey &&
-                !event.altKey &&
-                !event.metaKey;
-
-            this.lastKey =
-                "key=" +
-                event.key +
-                " code=" +
-                event.code +
-                " shift=" +
-                event.shiftKey +
-                " ctrl=" +
-                event.ctrlKey +
-                " alt=" +
-                event.altKey +
-                " isShiftJ=" +
-                isShiftJ +
-                " isShiftK=" +
-                isShiftK;
-
-            if (event.key === "F2") {
-                event.preventDefault();
-                event.stopPropagation();
-                this.toggleDebug();
-                return false;
-            }
-
-            if (this.mode === "insert") {
-                if (event.key === "Enter") {
-                    this.moveTrackedLine(1, "insert enter");
-                    this.lockLineSync(this.vimLineIndex, 1400, "insert enter");
-                    this.scheduleSafeLineSync("insert enter");
-                    this.lastAction = "insert passthrough enter";
-                    this.updateDebugIfVisible();
-                    return true;
                 }
 
-                if (event.key === "Backspace") {
-                    this.scheduleSafeLineSync("insert backspace");
-                    this.lastAction = "insert passthrough backspace";
-                    this.updateDebugIfVisible();
-                    return true;
-                }
-
-                if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    this.lastAction = "insert -> normal";
-                    this.safeSyncLine("escape insert", {
-                        allowPointer: true,
-                        allowDom: true,
-                        allowFakeZero: false,
-                    });
-                    this.setMode("normal");
-                    return false;
-                }
-
-                this.lastAction = "insert passthrough";
-                this.scheduleSafeLineSync("insert keydown " + event.key);
-                this.updateDebugIfVisible();
-                return true;
-            }
-
-            if (this.mode === "visual") {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                event.stopPropagation();
-
-                if (event.key === "Escape" || event.code === "Escape") {
-                    this.lastAction = "visual -> normal";
-                    this.exitVisualMode(false);
-                } else if (event.key === "h") {
-                    this.lastAction = "visual move left";
-                    this.extendVisualSelection("backward", "character");
-                    this.scheduleSafeLineSync("visual h");
-                } else if (event.key === "l") {
-                    this.lastAction = "visual move right";
-                    this.extendVisualSelection("forward", "character");
-                    this.scheduleSafeLineSync("visual l");
-                } else if (event.key === "j") {
-                    this.lastAction = "visual move down";
-                    this.extendVisualSelection("forward", "line");
-                    this.moveTrackedLine(1, "visual j");
-                    this.scheduleSafeLineSync("visual j");
-                } else if (event.key === "k") {
-                    this.lastAction = "visual move up";
-                    this.extendVisualSelection("backward", "line");
-                    this.moveTrackedLine(-1, "visual k");
-                    this.scheduleSafeLineSync("visual k");
-                } else if (event.key === "y") {
-                    const savedFieldIndex = this.fieldIndex;
-                    this.yankSelection();
-                    this.exitVisualMode(false, savedFieldIndex);
-                    this.forceNormalCursorRestore(
-                        savedFieldIndex,
-                        "visual yank",
-                    );
-                } else if (event.key === "d") {
-                    const savedFieldIndex = this.fieldIndex;
-                    this.deleteSelection();
-                    this.exitVisualMode(true, savedFieldIndex);
-                    this.forceNormalCursorRestore(
-                        savedFieldIndex,
-                        "visual delete",
-                    );
-                } else {
-                    this.lastAction = "visual ignored key";
-                }
-
-                this.refreshFieldOutline();
-                this.updateDebugIfVisible();
-                return false;
-            }
-
-            if (isShiftJ) {
-                event.preventDefault();
-                event.stopPropagation();
-                this.lastAction = "shift+j next field";
-                this.nextField();
-                return false;
-            }
-
-            if (isShiftK) {
-                event.preventDefault();
-                event.stopPropagation();
-                this.lastAction = "shift+k previous field";
-                this.previousField();
-                return false;
-            }
-
-            const handled = [
-                "Escape",
-                "i",
-                "a",
-                "o",
-                "h",
-                "j",
-                "k",
-                "l",
-                "0",
-                "$",
-                "d",
-                "y",
-                "v",
-                "p",
-                "P",
-            ];
-
-            if (!handled.includes(event.key)) {
-                this.lastAction = "normal unhandled passthrough";
-                this.updateDebugIfVisible();
-                return true;
-            }
-
-            event.preventDefault();
-            event.stopPropagation();
-
-            if (this.pendingOperator) {
-                const op = this.pendingOperator;
-                this.pendingOperator = null;
-                this.updateStatus();
-
-                this.safeSyncLine("before operator " + op, {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-
-                if (op === "d" && event.key === "d") {
-                    this.deleteCurrentLine();
-                } else if (op === "y" && event.key === "y") {
-                    this.yankCurrentLine();
-                } else {
-                    this.lastAction = "cancelled operator " + op;
-                }
-
-                this.refreshFieldOutline();
-                this.drawBlockCursorSoon();
-                this.updateDebugIfVisible();
-                return false;
-            }
-
-            if (event.key === "Escape") {
-                this.pendingOperator = null;
-                this.lastAction = "normal";
-                this.safeSyncLine("escape normal", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.setMode("normal");
-            } else if (event.key === "i") {
-                this.lastAction = "normal -> insert";
-                this.safeSyncLine("enter insert", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.setMode("insert");
-            } else if (event.key === "a") {
-                this.lastAction = "append";
-                this.moveSelection("forward", "character");
-                this.scheduleSafeLineSync("append");
-                this.setMode("insert");
-            } else if (event.key === "o") {
-                this.lastAction = "open line below";
-                this.openLineBelow();
-            } else if (event.key === "h") {
-                this.lastAction = "move left";
-                this.moveSelection("backward", "character");
-                this.scheduleSafeLineSync("h");
-            } else if (event.key === "l") {
-                this.lastAction = "move right";
-                this.moveSelection("forward", "character");
-                this.scheduleSafeLineSync("l");
-            } else if (event.key === "j") {
-                this.lastAction = "move down";
-                this.moveSelection("forward", "line");
-                this.moveTrackedLine(1, "normal j");
-                this.scheduleSafeLineSync("j");
-            } else if (event.key === "k") {
-                this.lastAction = "move up";
-                this.moveSelection("backward", "line");
-                this.moveTrackedLine(-1, "normal k");
-                this.scheduleSafeLineSync("k");
-            } else if (event.key === "0") {
-                this.lastAction = "line start";
-                this.moveSelection("backward", "lineboundary");
-                this.scheduleSafeLineSync("0");
-            } else if (event.key === "$") {
-                this.lastAction = "line end";
-                this.moveSelection("forward", "lineboundary");
-                this.scheduleSafeLineSync("$");
-            } else if (event.key === "d") {
-                this.safeSyncLine("operator d", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.pendingOperator = "d";
-                this.lastAction = "waiting for delete motion";
-                this.updateStatus();
-            } else if (event.key === "y") {
-                this.safeSyncLine("operator y", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.pendingOperator = "y";
-                this.lastAction = "waiting for yank motion";
-                this.updateStatus();
-            } else if (event.key === "v") {
-                this.enterVisualMode();
-            } else if (event.key === "p") {
-                this.safeSyncLine("paste p", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.pasteYankText("p");
-            } else if (event.key === "P") {
-                this.safeSyncLine("paste P", {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.pasteYankText("P");
-            }
-
-            this.refreshFieldOutline();
-            this.drawBlockCursorSoon();
-            this.updateDebugIfVisible();
-            return false;
-        },
-
-        candidateFields: function () {
-            let nodes = [];
-
-            const selectors = [
-                ".rich-text-editable",
-                "[contenteditable='true']",
-                "[contenteditable='plaintext-only']",
-            ];
-
-            for (const selector of selectors) {
-                for (const el of Array.from(
-                    document.querySelectorAll(selector),
-                )) {
-                    nodes.push(el);
+                if (rects.length > 0) {
+                    return rects[0];
                 }
             }
+        }
 
-            nodes = Array.from(new Set(nodes));
+        const p = domPos(m, pos);
+        const range = document.createRange();
 
-            nodes = nodes.filter((el) => {
-                if (!el) {
-                    return false;
+        try {
+            range.setStart(p.n, p.o);
+            range.collapse(true);
+
+            const rects = range.getClientRects();
+
+            if (rects.length > 0 && rects[0].height > 0) {
+                return rects[0];
+            }
+        } catch (error) {}
+
+        if (p.n.nodeType === 1 && p.n.childNodes[p.o]) {
+            const child = p.n.childNodes[p.o];
+
+            if (child.nodeType === 1) {
+                const r = child.getBoundingClientRect();
+
+                if (r.height > 0) {
+                    return { left: r.left, top: r.top, width: 0, height: r.height };
                 }
+            }
+        }
 
-                const cls = this.cls(el).toLowerCase();
-                const id = (el.id || "").toLowerCase();
-                const role = (el.getAttribute("role") || "").toLowerCase();
-                const aria = (
-                    el.getAttribute("aria-label") || ""
-                ).toLowerCase();
-                const tag = el.tagName.toLowerCase();
-                const rect = el.getBoundingClientRect();
+        const rootRect = m.root.getBoundingClientRect();
+        const style = getComputedStyle(m.root);
+        const lineHeight =
+            parseFloat(style.lineHeight) ||
+            (parseFloat(style.fontSize) || 16) * 1.3;
 
-                if (rect.width < 50 || rect.height < 10) {
-                    return false;
-                }
+        return {
+            left: rootRect.left + (parseFloat(style.paddingLeft) || 0),
+            top: rootRect.top + (parseFloat(style.paddingTop) || 0),
+            width: 0,
+            height: lineHeight,
+        };
+    }
 
-                if (
-                    tag === "button" ||
-                    tag === "select" ||
-                    tag === "input" ||
-                    tag === "textarea"
-                ) {
-                    return false;
-                }
+    function scrollParent(el) {
+        let node = el;
 
-                if (cls.includes("tag-spacer")) {
-                    return false;
-                }
+        while (node) {
+            const parent =
+                node.parentElement ||
+                (node.getRootNode() && node.getRootNode().host) ||
+                null;
 
-                if (id.includes("tag") || aria.includes("tag")) {
-                    return false;
-                }
-
-                if (role === "textbox" && cls.includes("tag")) {
-                    return false;
-                }
-
-                if (cls.includes("rich-text-editable")) {
-                    return true;
-                }
-
-                if (el.isContentEditable) {
-                    return true;
-                }
-
-                const ce = el.getAttribute("contenteditable");
-                return ce === "true" || ce === "plaintext-only";
-            });
-
-            nodes.sort((a, b) => {
-                const ar = a.getBoundingClientRect();
-                const br = b.getBoundingClientRect();
-
-                if (Math.abs(ar.top - br.top) > 5) {
-                    return ar.top - br.top;
-                }
-
-                return ar.left - br.left;
-            });
-
-            return nodes;
-        },
-
-        fields: function () {
-            return this.candidateFields();
-        },
-
-        fieldByIndex: function (index) {
-            const fields = this.fields();
-
-            if (fields.length === 0) {
+            if (!parent) {
                 return null;
             }
 
-            let safeIndex = index;
+            const style = getComputedStyle(parent);
 
-            if (safeIndex === undefined || safeIndex === null) {
-                safeIndex = this.fieldIndex || 0;
+            if (
+                /(auto|scroll)/.test(style.overflowY) &&
+                parent.scrollHeight > parent.clientHeight + 1
+            ) {
+                return parent;
             }
 
-            safeIndex = Math.max(
-                0,
-                Math.min(Number(safeIndex) || 0, fields.length - 1),
-            );
+            node = parent;
+        }
 
-            this.fieldIndex = safeIndex;
-            return fields[safeIndex];
-        },
+        return null;
+    }
 
-        updateFieldIndexFromActiveElement: function () {
-            const fields = this.fields();
-            const active = document.activeElement;
+    function ensureVisible(field, rect) {
+        const margin = 36;
+        const scroller = scrollParent(field);
+        const view = scroller
+            ? scroller.getBoundingClientRect()
+            : { top: 0, bottom: window.innerHeight };
+        let delta = 0;
 
-            if (!active) {
-                return false;
+        if (rect.top < view.top + 4) {
+            delta = rect.top - view.top - margin;
+        } else if (rect.top + rect.height > view.bottom - 4) {
+            delta = rect.top + rect.height - view.bottom + margin;
+        }
+
+        if (delta !== 0) {
+            if (scroller) {
+                scroller.scrollTop += delta;
+            } else {
+                window.scrollBy(0, delta);
             }
-
-            for (let i = 0; i < fields.length; i++) {
-                const container = this.fieldContainer(fields[i]);
-                const control = this.editorControl(fields[i]);
-
-                if (
-                    fields[i] === active ||
-                    fields[i].contains(active) ||
-                    control === active ||
-                    (container && container.contains(active))
-                ) {
-                    const oldIndex = this.fieldIndex;
-                    this.fieldIndex = i;
-
-                    if (oldIndex !== i) {
-                        this.vimLineIndex = 0;
-                    }
-
-                    this.syncPythonCurrentField(i);
-                    return true;
-                }
-            }
-
-            return false;
-        },
-
-        updateFieldIndexFromSelection: function () {
-            const fields = this.fields();
-            const sel = window.getSelection();
-
-            if (!sel || sel.rangeCount === 0) {
-                return false;
-            }
-
-            let node = sel.getRangeAt(0).startContainer;
-
-            if (node && node.nodeType === Node.TEXT_NODE) {
-                node = node.parentElement;
-            }
-
-            while (node && node !== document.body) {
-                for (let i = 0; i < fields.length; i++) {
-                    const container = this.fieldContainer(fields[i]);
-
-                    if (
-                        fields[i] === node ||
-                        fields[i].contains(node) ||
-                        (container && container.contains(node))
-                    ) {
-                        const oldIndex = this.fieldIndex;
-                        this.fieldIndex = i;
-
-                        if (oldIndex !== i) {
-                            this.vimLineIndex = 0;
-                        }
-
-                        this.syncPythonCurrentField(i);
-                        return true;
-                    }
-                }
-
-                node = node.parentElement;
-            }
-
-            return false;
-        },
-
-        fieldContainer: function (field) {
-            let node = field;
-
-            while (node && node !== document.body) {
-                const cls = this.cls(node).toLowerCase();
-                const role = (node.getAttribute?.("role") || "").toLowerCase();
-
-                if (
-                    cls.includes("field-container") ||
-                    role === "presentation"
-                ) {
-                    return node;
-                }
-
-                node = node.parentElement;
-            }
-
-            return field ? field.parentElement || field : null;
-        },
-
-        updateFieldFromPointerEvent: function (event) {
-            const fields = this.fields();
-
-            let index = -1;
-
-            for (let i = 0; i < fields.length; i++) {
-                const field = fields[i];
-                const container = this.fieldContainer(field);
-                const rect = (container || field).getBoundingClientRect();
-
-                const inside =
-                    event.clientY >= rect.top &&
-                    event.clientY <= rect.bottom &&
-                    event.clientX >= rect.left &&
-                    event.clientX <= rect.right;
-
-                if (inside) {
-                    index = i;
-                    break;
-                }
-            }
-
-            if (index < 0) {
-                return false;
-            }
-
-            const oldIndex = this.fieldIndex;
-            this.fieldIndex = index;
-
-            if (oldIndex !== index) {
-                this.vimLineIndex = 0;
-            }
-
-            this.syncPythonCurrentField(index);
-            this.refreshFieldOutline();
-            this.drawBlockCursorSoon();
 
             return true;
-        },
+        }
 
-        updatePointerLineAndApply: function (event) {
-            const field = this.fieldByIndex(this.fieldIndex);
+        return false;
+    }
 
-            if (!field) {
-                return false;
-            }
+    function drawCursor(allowScroll) {
+        let el = V.cursorEl;
 
-            const rect = field.getBoundingClientRect();
-
-            if (!rect || rect.height <= 0) {
-                return false;
-            }
-
-            const style = window.getComputedStyle(field);
-            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
-            const lineHeight = this.lineHeightPx(field);
-
-            let lineIndex = Math.floor(
-                (event.clientY - rect.top - paddingTop) / lineHeight,
-            );
-
-            lineIndex = Math.max(0, lineIndex);
-
-            this.lastPointerLineIndex = lineIndex;
-            this.lastPointerFieldIndex = this.fieldIndex;
-            this.lastPointerTime = Date.now();
-
-            this.vimLineIndex = lineIndex;
-            this.normalizeVimLineIndex();
-
-            this.lastAction =
-                "pointer line field=" +
-                this.fieldIndex +
-                " line=" +
-                this.vimLineIndex;
-
-            return true;
-        },
-
-        syncPythonCurrentField: function (index) {
-            try {
-                if (typeof pycmd === "function") {
-                    pycmd("focus:" + index);
-                }
-            } catch (error) {
-                console.log("[Anki Vim] pycmd focus failed", error);
-            }
-        },
-
-        syncPythonMode: function (mode) {
-            // Let Python know the live mode so the ":" command line only
-            // opens in normal mode (and ":" can be typed in insert/visual).
-            try {
-                if (typeof pycmd === "function") {
-                    pycmd("vimmode:" + mode);
-                }
-            } catch (error) {
-                console.log("[Anki Vim] pycmd mode failed", error);
-            }
-        },
-
-        isVisibleControl: function (el, fieldRect) {
-            if (!el) {
-                return false;
-            }
-
-            const tag = el.tagName ? el.tagName.toLowerCase() : "";
-
-            if (tag !== "textarea" && tag !== "input") {
-                return false;
-            }
-
-            const type = (el.getAttribute("type") || "").toLowerCase();
-
-            if (
-                type === "hidden" ||
-                type === "button" ||
-                type === "submit" ||
-                type === "checkbox" ||
-                type === "radio"
-            ) {
-                return false;
-            }
-
-            const rect = el.getBoundingClientRect();
-
-            if (rect.width <= 0 || rect.height <= 0) {
-                return false;
-            }
-
-            if (!fieldRect) {
-                return true;
-            }
-
-            const overlaps =
-                rect.bottom >= fieldRect.top &&
-                rect.top <= fieldRect.bottom &&
-                rect.right >= fieldRect.left &&
-                rect.left <= fieldRect.right;
-
-            return overlaps;
-        },
-
-        editorControl: function (field) {
-            if (!field) {
-                return null;
-            }
-
-            const active = document.activeElement;
-
-            if (active && (active.tagName || "").toLowerCase() === "textarea") {
-                return active;
-            }
-
-            if (
-                active &&
-                (active.tagName || "").toLowerCase() === "input" &&
-                typeof active.value === "string"
-            ) {
-                return active;
-            }
-
-            const container = this.fieldContainer(field);
-            const fieldRect = field.getBoundingClientRect();
-            const candidates = [];
-
-            if (container && container.querySelectorAll) {
-                for (const el of Array.from(
-                    container.querySelectorAll("textarea, input"),
-                )) {
-                    if (this.isVisibleControl(el, fieldRect)) {
-                        candidates.push(el);
-                    }
-                }
-            }
-
-            if (field.querySelectorAll) {
-                for (const el of Array.from(
-                    field.querySelectorAll("textarea, input"),
-                )) {
-                    if (this.isVisibleControl(el, fieldRect)) {
-                        candidates.push(el);
-                    }
-                }
-            }
-
-            const unique = Array.from(new Set(candidates));
-
-            if (unique.length === 0) {
-                return null;
-            }
-
-            unique.sort((a, b) => {
-                const av = typeof a.value === "string" ? a.value.length : 0;
-                const bv = typeof b.value === "string" ? b.value.length : 0;
-
-                if (bv !== av) {
-                    return bv - av;
-                }
-
-                const ar = a.getBoundingClientRect();
-                const br = b.getBoundingClientRect();
-
-                return ar.top - br.top;
-            });
-
-            return unique[0];
-        },
-
-        nodePlainText: function (node) {
-            if (!node) {
-                return "";
-            }
-
-            if (typeof node.value === "string") {
-                return node.value;
-            }
-
-            let text = node.innerText;
-
-            if (text === undefined || text === null) {
-                text = node.textContent || "";
-            }
-
-            return String(text).replace(/\n$/, "");
-        },
-
-        getFieldPlainText: function (field) {
-            const control = this.editorControl(field);
-
-            if (control) {
-                return control.value || "";
-            }
-
-            return this.nodePlainText(field);
-        },
-
-        isBlockElement: function (node) {
-            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
-                return false;
-            }
-
-            const tag = node.tagName.toLowerCase();
-
-            return [
-                "div",
-                "p",
-                "li",
-                "section",
-                "article",
-                "header",
-                "footer",
-                "blockquote",
-                "pre",
-            ].includes(tag);
-        },
-
-        fragmentToPlainText: function (root) {
-            let out = "";
-
-            const walk = (node) => {
-                if (!node) {
-                    return;
-                }
-
-                if (node.nodeType === Node.TEXT_NODE) {
-                    out += node.nodeValue || "";
-                    return;
-                }
-
-                if (node.nodeType !== Node.ELEMENT_NODE) {
-                    for (const child of Array.from(node.childNodes || [])) {
-                        walk(child);
-                    }
-
-                    return;
-                }
-
-                const tag = node.tagName.toLowerCase();
-
-                if (tag === "br") {
-                    out += "\n";
-                    return;
-                }
-
-                const isBlock = this.isBlockElement(node);
-                const before = out.length;
-
-                for (const child of Array.from(node.childNodes || [])) {
-                    walk(child);
-                }
-
-                if (isBlock && out.length === before) {
-                    out += "\n";
-                    return;
-                }
-
-                if (isBlock && out.length > 0 && !out.endsWith("\n")) {
-                    out += "\n";
-                }
-            };
-
-            for (const child of Array.from(root.childNodes || [])) {
-                walk(child);
-            }
-
-            return out;
-        },
-
-        isProbablyFakeRootZeroSelection: function (field, range, beforeText) {
-            if (!field || !range) {
-                return false;
-            }
-
-            const start = range.startContainer;
-            const offset = range.startOffset || 0;
-
-            const text = this.getFieldPlainText(field);
-            const fieldHasMultipleLines = String(text || "").includes("\n");
-
-            if (!fieldHasMultipleLines) {
-                return false;
-            }
-
-            if (offset !== 0) {
-                return false;
-            }
-
-            if (beforeText && beforeText.length > 0) {
-                return false;
-            }
-
-            if (start === field) {
-                return true;
-            }
-
-            if (start && start.nodeType === Node.ELEMENT_NODE) {
-                const el = start;
-                const cls = this.cls(el).toLowerCase();
-
-                if (
-                    el === field ||
-                    cls.includes("rich-text") ||
-                    cls.includes("relative") ||
-                    cls.includes("editable") ||
-                    field.contains(el)
-                ) {
-                    return true;
-                }
-            }
-
-            return false;
-        },
-
-        // Anki's editor fields live inside an open shadow root. The caret/
-        // selection is INSIDE that shadow tree, so window.getSelection() only
-        // returns a retargeted host-level range. We must read the selection
-        // from the shadow root itself (Chromium's ShadowRoot.getSelection()).
-        shadowRootFor: function (field) {
-            if (!field) {
-                return null;
-            }
-
-            if (
-                field.shadowRoot &&
-                typeof field.shadowRoot.getSelection === "function"
-            ) {
-                return field.shadowRoot;
-            }
-
-            if (field.querySelectorAll) {
-                for (const el of Array.from(field.querySelectorAll("*"))) {
-                    if (
-                        el.shadowRoot &&
-                        typeof el.shadowRoot.getSelection === "function"
-                    ) {
-                        return el.shadowRoot;
-                    }
-                }
-            }
-
-            let parent = field.parentElement;
-            let depth = 0;
-
-            while (parent && depth < 4) {
-                if (
-                    parent.shadowRoot &&
-                    typeof parent.shadowRoot.getSelection === "function"
-                ) {
-                    return parent.shadowRoot;
-                }
-
-                parent = parent.parentElement;
-                depth++;
-            }
-
-            return null;
-        },
-
-        // The Selection object that actually contains the caret for this field.
-        editableSelection: function (field) {
-            const root = this.shadowRootFor(field);
-
-            if (root) {
-                try {
-                    return root.getSelection();
-                } catch (error) {}
-            }
-
-            return window.getSelection();
-        },
-
-        // The element whose text content the caret offset/line is measured in.
-        editableElement: function (field) {
-            const root = this.shadowRootFor(field);
-
-            if (root) {
-                const editable = root.querySelector(
-                    'anki-editable,[contenteditable="true"],' +
-                        '[contenteditable=""],[contenteditable="plaintext-only"]',
-                );
-
-                if (editable) {
-                    return editable;
-                }
-            }
-
-            return field;
-        },
-
-        getCaretLineIndexFromDomSelection: function (field) {
-            const sel = this.editableSelection(field);
-            const editable = this.editableElement(field);
-
-            if (!field || !sel || sel.rangeCount === 0) {
-                return null;
-            }
-
-            const range = sel.getRangeAt(0);
-
-            if (
-                !editable.contains(range.startContainer) &&
-                editable !== range.startContainer
-            ) {
-                return null;
-            }
-
-            try {
-                const pre = document.createRange();
-                pre.selectNodeContents(editable);
-                pre.setEnd(range.startContainer, range.startOffset);
-
-                const fragment = pre.cloneContents();
-                const beforeText = this.fragmentToPlainText(fragment);
-
-                if (
-                    this.isProbablyFakeRootZeroSelection(
-                        editable,
-                        range,
-                        beforeText,
-                    )
-                ) {
-                    return null;
-                }
-
-                let lineIndex = beforeText.split("\n").length - 1;
-                lineIndex = Math.max(0, lineIndex);
-
-                return lineIndex;
-            } catch (error) {
-                return null;
-            }
-        },
-
-        lockLineSync: function (lineIndex, durationMs, reason) {
-            this.vimLineIndex = Math.max(0, Number(lineIndex) || 0);
-            this.lockedVimLineIndex = this.vimLineIndex;
-            this.lineSyncLockUntil = Date.now() + (durationMs || 1200);
-            this.lastInternalLineMoveTime = Date.now();
-            this.lastAction =
-                "locked line sync reason=" +
-                reason +
-                " line=" +
-                this.vimLineIndex;
-        },
-
-        forceVirtualBlockCursor: function (durationMs, reason) {
-            // No-op: the cursor is now the real caret (caret-shape), so there
-            // is no virtual/overlay block to force. Kept for call-site compat.
-            this.virtualBlockCursorReason = reason || "";
-        },
-
-        scheduleSafeLineSync: function (reason) {
-            setTimeout(() => {
-                this.safeSyncLine(reason + " t0", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-            }, 0);
-
-            setTimeout(() => {
-                this.safeSyncLine(reason + " t50", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-            }, 50);
-
-            setTimeout(() => {
-                this.safeSyncLine(reason + " t160", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-            }, 160);
-        },
-
-        safeSyncLine: function (reason, options) {
-            const opts = options || {};
-            const allowPointer = opts.allowPointer !== false;
-            const allowDom = opts.allowDom !== false;
-
-            const field =
-                this.currentField() || this.fieldByIndex(this.fieldIndex);
-
-            if (!field) {
-                return false;
-            }
-
-            const lockActive =
-                this.lockedVimLineIndex !== null &&
-                Date.now() < this.lineSyncLockUntil;
-
-            const control = this.editorControl(field);
-
-            if (control && typeof control.value === "string") {
-                const text = control.value || "";
-                const caret = control.selectionStart || 0;
-
-                const controlLine = this.lineIndexFromOffset(text, caret);
-
-                if (
-                    lockActive &&
-                    controlLine === 0 &&
-                    this.lockedVimLineIndex > 0
-                ) {
-                    this.vimLineIndex = this.lockedVimLineIndex;
-                    this.normalizeVimLineIndex();
-
-                    this.lastAction =
-                        "kept locked line from fake control zero reason=" +
-                        reason +
-                        " line=" +
-                        this.vimLineIndex;
-
-                    return false;
-                }
-
-                this.vimLineIndex = controlLine;
-                this.normalizeVimLineIndex();
-
-                this.lastAction =
-                    "synced line from control reason=" +
-                    reason +
-                    " line=" +
-                    this.vimLineIndex;
-
-                return true;
-            }
-
-            if (
-                allowPointer &&
-                this.lastPointerFieldIndex === this.fieldIndex &&
-                this.lastPointerLineIndex !== null &&
-                this.lastPointerTime >= this.lastInternalLineMoveTime &&
-                Date.now() - this.lastPointerTime < 1600
-            ) {
-                this.vimLineIndex = this.lastPointerLineIndex;
-                this.normalizeVimLineIndex();
-
-                this.lastAction =
-                    "synced line from pointer reason=" +
-                    reason +
-                    " line=" +
-                    this.vimLineIndex;
-
-                return true;
-            }
-
-            if (allowDom) {
-                const domLine = this.getCaretLineIndexFromDomSelection(field);
-
-                if (domLine !== null && domLine !== undefined) {
-                    if (
-                        lockActive &&
-                        domLine === 0 &&
-                        this.lockedVimLineIndex > 0
-                    ) {
-                        this.vimLineIndex = this.lockedVimLineIndex;
-                        this.normalizeVimLineIndex();
-
-                        this.lastAction =
-                            "kept locked line from fake DOM zero reason=" +
-                            reason +
-                            " line=" +
-                            this.vimLineIndex;
-
-                        return false;
-                    }
-
-                    if (
-                        domLine === 0 &&
-                        this.vimLineIndex > 0 &&
-                        Date.now() - this.lastInternalLineMoveTime < 1200
-                    ) {
-                        this.normalizeVimLineIndex();
-                        this.lastAction =
-                            "ignored fake DOM zero reason=" +
-                            reason +
-                            " kept line=" +
-                            this.vimLineIndex;
-                        return false;
-                    }
-
-                    this.vimLineIndex = domLine;
-                    this.normalizeVimLineIndex();
-
-                    this.lastAction =
-                        "synced line from DOM reason=" +
-                        reason +
-                        " line=" +
-                        this.vimLineIndex;
-
-                    return true;
-                }
-            }
-
-            this.normalizeVimLineIndex();
-            return false;
-        },
-
-        normalizeVimLineIndex: function () {
-            const parsed = Number(this.vimLineIndex);
-
-            if (!Number.isFinite(parsed)) {
-                this.vimLineIndex = 0;
-            } else {
-                this.vimLineIndex = Math.floor(parsed);
-            }
-
-            if (this.vimLineIndex < 0) {
-                this.vimLineIndex = 0;
-            }
-
-            return this.vimLineIndex;
-        },
-
-        lineIndexFromOffset: function (text, offset) {
-            const safeOffset = Math.max(0, Math.min(offset || 0, text.length));
-            return text.slice(0, safeOffset).split("\n").length - 1;
-        },
-
-        offsetForLineIndex: function (text, lineIndex) {
-            const lines = String(text || "").split("\n");
-            const safeLine = Math.max(
-                0,
-                Math.min(Number(lineIndex) || 0, lines.length - 1),
-            );
-
-            let offset = 0;
-
-            for (let i = 0; i < safeLine; i++) {
-                offset += lines[i].length + 1;
-            }
-
-            return offset;
-        },
-
-        getCurrentFieldLineCountDebugOnly: function () {
-            const field = this.fieldByIndex(this.fieldIndex);
-
-            if (!field) {
-                return 1;
-            }
-
-            const text = this.getFieldPlainText(field);
-
-            if (text === "") {
-                return 1;
-            }
-
-            return Math.max(1, text.split("\n").length);
-        },
-
-        currentField: function () {
-            const fields = this.fields();
-
-            if (fields.length === 0) {
-                return null;
-            }
-
-            if (this.updateFieldIndexFromActiveElement()) {
-                return fields[this.fieldIndex];
-            }
-
-            if (this.updateFieldIndexFromSelection()) {
-                return fields[this.fieldIndex];
-            }
-
-            this.fieldIndex = Math.max(
-                0,
-                Math.min(this.fieldIndex || 0, fields.length - 1),
-            );
-
-            return fields[this.fieldIndex];
-        },
-
-        moveTrackedLine: function (delta, reason) {
-            // An explicit j/k move means any line-sync lock left over from a
-            // previous dd/yy/p is stale. Clear it so DOM line detection (now
-            // reliable via the shadow root) isn't pinned to the old line.
-            this.lockedVimLineIndex = null;
-            this.lineSyncLockUntil = 0;
-
-            this.vimLineIndex = (Number(this.vimLineIndex) || 0) + delta;
-            this.normalizeVimLineIndex();
-            this.lastInternalLineMoveTime = Date.now();
-
-            this.lastAction =
-                "tracked vimLineIndex=" +
-                this.vimLineIndex +
-                " reason=" +
-                reason +
-                " jsLineCountDebugOnly=" +
-                this.getCurrentFieldLineCountDebugOnly();
-        },
-
-        sendPythonLineOp: function (op) {
-            const field =
-                this.currentField() || this.fieldByIndex(this.fieldIndex);
-
-            let caretOffset = 0;
-
-            if (field) {
-                this.safeSyncLine("send op " + op, {
-                    allowPointer: true,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                caretOffset = this.getCaretOffsetInField(field);
-            }
-
-            this.normalizeVimLineIndex();
-
-            const payload = {
-                op: op,
-                fieldIndex: this.fieldIndex,
-                caretOffset: caretOffset,
-                vimLineIndex: this.vimLineIndex,
-                yankText: this.yankText || "",
-                yankIsLine: !!this.yankIsLine,
-            };
-
-            try {
-                if (typeof pycmd === "function") {
-                    pycmd("anki_vim:" + JSON.stringify(payload));
-                    this.lastAction =
-                        "sent python op " +
-                        op +
-                        " fieldIndex=" +
-                        payload.fieldIndex +
-                        " vimLineIndex=" +
-                        payload.vimLineIndex;
-                } else {
-                    this.lastAction = "python op failed: no pycmd";
-                }
-            } catch (error) {
-                this.lastAction = "python op failed: " + error;
-            }
-
-            this.refreshFieldOutline();
-            this.drawBlockCursorSoon();
-            this.updateDebugIfVisible();
-        },
-
-        receivePythonLineOp: function (result) {
-            if (!result) {
-                return;
-            }
-
-            if (result.yankText !== undefined) {
-                this.yankText = result.yankText;
-            }
-
-            if (result.yankIsLine !== undefined) {
-                this.yankIsLine = !!result.yankIsLine;
-            }
-
-            if (result.fieldIndex !== undefined) {
-                this.fieldIndex = result.fieldIndex;
-            }
-
-            if (result.caretOffset !== undefined) {
-                this.pythonCaretOffset = result.caretOffset;
-            }
-
-            if (result.vimLineIndex !== undefined) {
-                this.vimLineIndex = result.vimLineIndex;
-            } else if (result.currentLineIndex !== undefined) {
-                this.vimLineIndex = result.currentLineIndex;
-            } else if (result.lineIndexHint !== undefined) {
-                this.vimLineIndex = result.lineIndexHint;
-            }
-
-            this.normalizeVimLineIndex();
-
-            /*
-              dd/p reload the field, so Anki may briefly report the caret at
-              the bottom or wrapper offset 0. Lock the Python-confirmed line and
-              draw a virtual block cursor long enough for the editor to settle.
-            */
-            this.lockLineSync(
-                this.vimLineIndex,
-                1800,
-                "python result " + result.op,
-            );
-            this.forceVirtualBlockCursor(1800, "python result " + result.op);
-
-            this.pendingOperator = null;
-            this.mode = "normal";
-            document.body.dataset.ankiVimMode = "normal";
-            this.syncPythonMode("normal");
-            this.updateStatus();
-
-            this.lastAction = result.action || result.error || "python op done";
-
-            const wantedFieldIndex = this.fieldIndex;
-            const wantedCaretOffset =
-                result.caretOffset !== undefined
-                    ? result.caretOffset
-                    : this.pythonCaretOffset || 0;
-
-            const refocus = () => {
-                const field = this.fieldByIndex(wantedFieldIndex);
-
-                if (!field) {
-                    this.lastAction += " | refocus failed: no field";
-                    this.updateDebugIfVisible();
-                    return;
-                }
-
-                this.focusFieldElement(field, false);
-
-                const restored = this.setCaretOffsetInField(
-                    field,
-                    wantedCaretOffset,
-                );
-
-                if (!restored) {
-                    this.focusFieldElement(field, false);
-                }
-
-                this.vimLineIndex =
-                    this.lockedVimLineIndex ?? this.vimLineIndex;
-                this.normalizeVimLineIndex();
-                this.refreshFieldOutline();
-                this.drawBlockCursor();
-                this.updateDebugIfVisible();
-            };
-
-            setTimeout(refocus, 0);
-            setTimeout(refocus, 80);
-            setTimeout(refocus, 180);
-            setTimeout(refocus, 360);
-            setTimeout(refocus, 720);
-            // Extra ticks outlast a slow loadNote rebuild so the caret ends on
-            // the target line rather than the default top/bottom.
-            setTimeout(refocus, 1100);
-            setTimeout(refocus, 1600);
-        },
-
-        nativeFocusField: function (index, end) {
-            const fields = this.fields();
-
-            if (fields.length === 0) {
-                this.lastAction = "nativeFocusField failed: no fields";
-                this.updateDebugIfVisible();
-                return;
-            }
-
-            if (index < 0) {
-                index = fields.length - 1;
-            }
-
-            if (index >= fields.length) {
-                index = 0;
-            }
-
-            this.fieldIndex = index;
-            this.syncPythonCurrentField(index);
-
-            this.vimLineIndex = end ? 999999 : 0;
-            this.normalizeVimLineIndex();
-
-            try {
-                if (
-                    typeof window.focusField === "function" &&
-                    window.focusField !== this.nativeFocusField
-                ) {
-                    window.focusField(index);
-                }
-            } catch (error) {
-                console.log(
-                    "[Anki Vim] native window.focusField failed",
-                    error,
-                );
-            }
-
-            const field = fields[index];
-
-            try {
-                field.scrollIntoView({
-                    block: "nearest",
-                    inline: "nearest",
-                });
-            } catch (error) {}
-
-            this.focusFieldElement(field, end);
-            this.lastAction =
-                "native focused field index " +
-                index +
-                " total=" +
-                fields.length +
-                " vimLineIndex=" +
-                this.vimLineIndex;
-
-            this.forceRefocusAndCursor(field);
-        },
-
-        focusField: function (index, end) {
-            this.nativeFocusField(index, end);
-        },
-
-        focusFieldElement: function (field, end) {
-            if (!field) {
-                return;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                try {
-                    control.focus({ preventScroll: true });
-                } catch (error) {
-                    control.focus();
-                }
-
-                const pos = end ? control.value.length : 0;
-
-                try {
-                    control.setSelectionRange(pos, pos);
-                } catch (error) {}
-
-                this.safeSyncLine("focus control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                return;
-            }
-
-            try {
-                field.focus({ preventScroll: true });
-            } catch (error) {
-                try {
-                    field.focus();
-                } catch (innerError) {}
-            }
-        },
-
-        ensureField: function () {
-            let field = this.currentField();
-
-            if (!field) {
-                this.focusField(this.fieldIndex, true);
-                field = this.currentField();
-            } else {
-                const control = this.editorControl(field);
-
-                try {
-                    (control || field).focus({ preventScroll: true });
-                } catch (error) {
-                    try {
-                        (control || field).focus();
-                    } catch (innerError) {}
-                }
-            }
-
-            return field;
-        },
-
-        forceRefocusAndCursor: function (field) {
-            const target =
-                field ||
-                this.currentField() ||
-                this.fieldByIndex(this.fieldIndex);
-
-            if (!target) {
-                return;
-            }
-
-            const tick = () => {
-                const control = this.editorControl(target);
-
-                try {
-                    (control || target).focus({ preventScroll: true });
-                } catch (error) {
-                    try {
-                        (control || target).focus();
-                    } catch (innerError) {}
-                }
-
-                this.refreshFieldOutline();
-                this.drawBlockCursor();
-                this.updateDebugIfVisible();
-            };
-
-            tick();
-            setTimeout(tick, 0);
-            setTimeout(tick, 80);
-            setTimeout(tick, 180);
-        },
-
-        forceNormalCursorRestore: function (fieldIndex, reason) {
-            const wantedFieldIndex =
-                fieldIndex !== undefined && fieldIndex !== null
-                    ? fieldIndex
-                    : this.fieldIndex;
-
-            this.forceVirtualBlockCursor(1400, reason);
-
-            const restore = () => {
-                this.mode = "normal";
-                this.pendingOperator = null;
-                this.visualAnchorOffset = null;
-                document.body.dataset.ankiVimMode = "normal";
-                this.syncPythonMode("normal");
-                this.updateStatus();
-
-                const field = this.fieldByIndex(wantedFieldIndex);
-
-                if (field) {
-                    try {
-                        field.focus({ preventScroll: true });
-                    } catch (error) {
-                        try {
-                            field.focus();
-                        } catch (innerError) {}
-                    }
-
-                    this.refreshFieldOutline();
-                }
-
-                this.drawBlockCursor();
-                this.updateDebugIfVisible();
-
-                this.lastAction =
-                    (this.lastAction || "") +
-                    " | restored normal cursor after " +
-                    reason;
-            };
-
-            restore();
-            setTimeout(restore, 0);
-            setTimeout(restore, 60);
-            setTimeout(restore, 140);
-            setTimeout(restore, 280);
-            setTimeout(restore, 520);
-        },
-
-        moveSelection: function (direction, granularity) {
-            const field = this.ensureField();
-
-            if (!field) {
-                this.lastAction = "move failed: no field";
-                return;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                this.moveControlSelection(control, direction, granularity);
-                this.safeSyncLine("move control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.drawBlockCursorSoon();
-                return;
-            }
-
-            const sel = this.editableSelection(field);
-
-            if (!sel || sel.rangeCount === 0) {
-                this.focusField(this.fieldIndex, true);
-                return;
-            }
-
-            try {
-                // Collapse the block back to the caret before moving so the
-                // move starts from the cursor, not a selection edge.
-                if (!sel.isCollapsed) {
-                    sel.collapse(sel.anchorNode, sel.anchorOffset);
-                }
-
-                sel.modify("move", direction, granularity);
-            } catch (error) {
-                console.log("[Anki Vim] selection.modify failed", error);
-                this.lastAction = "move failed: " + error;
-            }
-
-            this.placeBlockCaret();
-        },
-
-        moveControlSelection: function (control, direction, granularity) {
-            const text = control.value || "";
-            let pos = control.selectionStart || 0;
-
-            if (granularity === "character") {
-                pos += direction === "forward" ? 1 : -1;
-            } else if (granularity === "lineboundary") {
-                const bounds = this.getLineBounds(text, pos, false);
-                pos = direction === "forward" ? bounds.end : bounds.start;
-            } else if (granularity === "line") {
-                const lines = text.split("\n");
-                let currentLine = 0;
-                let column = 0;
-                let running = 0;
-
-                for (let i = 0; i < lines.length; i++) {
-                    const lineLen = lines[i].length;
-
-                    if (pos <= running + lineLen) {
-                        currentLine = i;
-                        column = pos - running;
-                        break;
-                    }
-
-                    running += lineLen + 1;
-                }
-
-                let nextLine = currentLine + (direction === "forward" ? 1 : -1);
-                nextLine = Math.max(0, Math.min(nextLine, lines.length - 1));
-
-                let nextOffset = 0;
-
-                for (let i = 0; i < nextLine; i++) {
-                    nextOffset += lines[i].length + 1;
-                }
-
-                pos = nextOffset + Math.min(column, lines[nextLine].length);
-            }
-
-            pos = Math.max(0, Math.min(pos, text.length));
-
-            try {
-                control.setSelectionRange(pos, pos);
-            } catch (error) {}
-        },
-
-        dispatchInputForField: function (field, inputType, data) {
-            const control = this.editorControl(field);
-
-            for (const target of [control, field]) {
-                if (!target) {
-                    continue;
-                }
-
-                try {
-                    target.dispatchEvent(
-                        new InputEvent("input", {
-                            bubbles: true,
-                            cancelable: false,
-                            inputType: inputType || "insertText",
-                            data: data || null,
-                        }),
-                    );
-                } catch (error) {
-                    try {
-                        target.dispatchEvent(
-                            new Event("input", {
-                                bubbles: true,
-                                cancelable: false,
-                            }),
-                        );
-                    } catch (innerError) {}
-                }
-
-                try {
-                    target.dispatchEvent(
-                        new Event("change", {
-                            bubbles: true,
-                            cancelable: false,
-                        }),
-                    );
-                } catch (error) {}
-            }
-        },
-
-        getCaretOffsetInField: function (field) {
-            const control = this.editorControl(field);
-
-            if (control) {
-                return Math.max(
-                    0,
-                    Math.min(control.selectionStart || 0, control.value.length),
-                );
-            }
-
-            const sel = this.editableSelection(field);
-            const editable = this.editableElement(field);
-
-            if (!field || !sel || sel.rangeCount === 0) {
-                return this.pythonCaretOffset || 0;
-            }
-
-            const range = sel.getRangeAt(0);
-
-            if (
-                !editable.contains(range.startContainer) &&
-                editable !== range.startContainer
-            ) {
-                return this.pythonCaretOffset || 0;
-            }
-
-            try {
-                const pre = document.createRange();
-                pre.selectNodeContents(editable);
-                pre.setEnd(range.startContainer, range.startOffset);
-
-                const fragment = pre.cloneContents();
-                const beforeText = this.fragmentToPlainText(fragment);
-
-                if (
-                    this.isProbablyFakeRootZeroSelection(
-                        editable,
-                        range,
-                        beforeText,
-                    )
-                ) {
-                    return this.pythonCaretOffset || 0;
-                }
-
-                return beforeText.length;
-            } catch (error) {
-                return this.pythonCaretOffset || 0;
-            }
-        },
-
-        setCaretOffsetInField: function (field, offset) {
-            if (!field) {
-                return false;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const pos = Math.max(0, Math.min(offset, control.value.length));
-
-                try {
-                    control.focus({ preventScroll: true });
-                } catch (error) {
-                    control.focus();
-                }
-
-                try {
-                    control.setSelectionRange(pos, pos);
-                } catch (error) {}
-
-                this.safeSyncLine("set caret control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                return true;
-            }
-
-            // Contenteditable: place the caret at the plain-text offset by
-            // mapping it directly to a DOM point (previously this only focused
-            // the field, so after a dd/p reload the caret defaulted to the
-            // end). Direct placement is deterministic and does not depend on
-            // focus/active-selection timing the way Selection.modify does.
-            const editable = this.editableElement(field);
-            const sel = this.editableSelection(field);
-
-            try {
-                (editable || field).focus({ preventScroll: true });
-            } catch (error) {
-                try {
-                    (editable || field).focus();
-                } catch (innerError) {}
-            }
-
-            if (!editable || !sel) {
-                return true;
-            }
-
-            // Map the plain-text offset straight to a DOM point in the live
-            // editable (no dependency on getFieldPlainText, which can be empty
-            // mid-reload) and set the caret with sel.collapse() -- the same
-            // API the block cursor uses, which reliably moves the real caret.
-            const safeOffset = Math.max(0, offset || 0);
-            const point = this.domPointForOffset(editable, safeOffset);
-
-            if (point && point.node) {
-                try {
-                    sel.collapse(point.node, point.offset);
-                } catch (error) {}
-            }
-
-            this.safeSyncLine("set caret content", {
-                allowPointer: false,
-                allowDom: true,
-                allowFakeZero: false,
-            });
-
-            return true;
-        },
-
-        // Map a plain-text offset (as produced by fragmentToPlainText) to a
-        // DOM caret point {node, offset} inside the editable. Handles text
-        // nodes and <br> line breaks at any depth, plus block-element
-        // boundaries, so the caret lands on the right line after a reload.
-        domPointForOffset: function (editable, target) {
-            if (!editable) {
-                return null;
-            }
-
-            let pos = 0;
-            let result = null;
-
-            const visit = (node) => {
-                if (result) {
-                    return;
-                }
-
-                const children = Array.from(node.childNodes || []);
-
-                for (let i = 0; i < children.length; i++) {
-                    if (result) {
-                        return;
-                    }
-
-                    const child = children[i];
-
-                    if (child.nodeType === Node.TEXT_NODE) {
-                        const len = (child.nodeValue || "").length;
-
-                        if (target <= pos + len) {
-                            result = { node: child, offset: target - pos };
-                            return;
-                        }
-
-                        pos += len;
-                        continue;
-                    }
-
-                    if (child.nodeType !== Node.ELEMENT_NODE) {
-                        continue;
-                    }
-
-                    const tag = child.tagName.toLowerCase();
-
-                    if (tag === "br") {
-                        if (target <= pos) {
-                            result = { node: node, offset: i };
-                            return;
-                        }
-
-                        pos += 1;
-
-                        if (target <= pos) {
-                            result = { node: node, offset: i + 1 };
-                            return;
-                        }
-
-                        continue;
-                    }
-
-                    const isBlock = this.isBlockElement(child);
-                    const before = pos;
-
-                    visit(child);
-
-                    if (result) {
-                        return;
-                    }
-
-                    if (isBlock && (pos === before || pos > 0)) {
-                        if (target <= pos) {
-                            result = {
-                                node: child,
-                                offset: child.childNodes.length,
-                            };
-                            return;
-                        }
-
-                        pos += 1;
-                    }
-                }
-            };
-
-            visit(editable);
-
-            if (!result) {
-                result = { node: editable, offset: editable.childNodes.length };
-            }
-
-            return result;
-        },
-
-        getLineBounds: function (text, offset, includeNewline) {
-            const safeOffset = Math.max(0, Math.min(offset, text.length));
-
-            let start = text.lastIndexOf("\n", Math.max(0, safeOffset - 1));
-
-            if (start === -1) {
-                start = 0;
-            } else {
-                start = start + 1;
-            }
-
-            let end = text.indexOf("\n", safeOffset);
-
-            if (end === -1) {
-                end = text.length;
-            } else if (includeNewline) {
-                end = end + 1;
-            }
-
-            return {
-                start: start,
-                end: end,
-            };
-        },
-
-        lineHeightPx: function (field) {
-            try {
-                const style = window.getComputedStyle(field);
-                const lineHeight = parseFloat(style.lineHeight);
-
-                if (!Number.isNaN(lineHeight) && lineHeight > 0) {
-                    return lineHeight;
-                }
-
-                const fontSize = parseFloat(style.fontSize);
-
-                if (!Number.isNaN(fontSize) && fontSize > 0) {
-                    return fontSize * 1.2;
-                }
-            } catch (error) {}
-
-            return 20;
-        },
-
-        replaceFieldPlainText: function (
-            field,
-            newText,
-            caretOffset,
-            inputType,
-        ) {
-            const control = this.editorControl(field);
-
-            if (control) {
-                const safeCaret = Math.max(
-                    0,
-                    Math.min(caretOffset || 0, newText.length),
-                );
-
-                control.value = newText;
-                this.dispatchInputForField(
-                    field,
-                    inputType || "insertText",
-                    newText,
-                );
-
-                try {
-                    control.focus({ preventScroll: true });
-                } catch (error) {
-                    control.focus();
-                }
-
-                try {
-                    control.setSelectionRange(safeCaret, safeCaret);
-                } catch (error) {}
-
-                this.safeSyncLine("replace text", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.forceRefocusAndCursor(field);
-                return true;
-            }
-
-            return false;
-        },
-
-        yankCurrentLine: function () {
-            this.sendPythonLineOp("yy");
-        },
-
-        deleteCurrentLine: function () {
-            this.sendPythonLineOp("dd");
-        },
-
-        enterVisualMode: function () {
-            const field = this.ensureField();
-
-            if (!field) {
-                this.lastAction = "visual failed: no field";
-                return;
-            }
-
-            // Collapse the normal-mode block to a plain caret first, so visual
-            // mode starts by selecting a single character at the cursor.
-            this.collapseBlockToCursor();
-
-            this.safeSyncLine("enter visual", {
-                allowPointer: true,
-                allowDom: true,
-                allowFakeZero: false,
-            });
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const caret = control.selectionStart || 0;
-                const end = Math.min(caret + 1, control.value.length);
-
-                this.visualAnchorOffset = caret;
-
-                this.mode = "visual";
-                document.body.dataset.ankiVimMode = "visual";
-                this.syncPythonMode("visual");
-                this.pendingOperator = null;
-                this.lastAction = "entered visual mode";
-                this.updateStatus();
-
-                try {
-                    control.setSelectionRange(caret, end);
-                } catch (error) {}
-
-                this.removeBlockCursor();
-                this.updateDebugIfVisible();
-                return;
-            }
-
-            const sel = window.getSelection();
-
-            if (!sel || sel.rangeCount === 0) {
-                this.lastAction = "visual failed: no range";
-                return;
-            }
-
-            this.mode = "visual";
-            document.body.dataset.ankiVimMode = "visual";
-            this.syncPythonMode("visual");
-            this.pendingOperator = null;
-            this.lastAction = "entered visual mode";
-            this.updateStatus();
-
-            try {
-                sel.modify("extend", "forward", "character");
-            } catch (error) {}
-
-            this.removeBlockCursor();
-            this.updateDebugIfVisible();
-        },
-
-        exitVisualMode: function (collapseToStart, forcedFieldIndex) {
-            const savedFieldIndex =
-                forcedFieldIndex !== undefined && forcedFieldIndex !== null
-                    ? forcedFieldIndex
-                    : this.fieldIndex;
-
-            const field =
-                this.currentField() || this.fieldByIndex(savedFieldIndex);
-            const control = field ? this.editorControl(field) : null;
-            let finalOffset = this.pythonCaretOffset || 0;
-
-            if (control) {
-                const start = control.selectionStart || 0;
-                const end = control.selectionEnd || 0;
-                const pos = collapseToStart
-                    ? Math.min(start, end)
-                    : Math.max(start, end);
-
-                try {
-                    control.setSelectionRange(pos, pos);
-                } catch (error) {}
-
-                finalOffset = pos;
-                this.safeSyncLine("exit visual control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-            } else if (field) {
-                const sel = this.editableSelection(field);
-
-                if (sel && sel.rangeCount > 0) {
-                    const range = sel.getRangeAt(0).cloneRange();
-                    range.collapse(!!collapseToStart);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    this.safeSyncLine("exit visual dom", {
-                        allowPointer: false,
-                        allowDom: true,
-                        allowFakeZero: false,
-                    });
-                }
-            }
-
-            this.mode = "normal";
-            this.pendingOperator = null;
-            this.visualAnchorOffset = null;
-            document.body.dataset.ankiVimMode = "normal";
-            this.syncPythonMode("normal");
-            this.updateStatus();
-            this.forceVirtualBlockCursor(1400, "exit visual");
-
-            const refocus = () => {
-                const target = this.fieldByIndex(savedFieldIndex) || field;
-
-                if (!target) {
-                    return;
-                }
-
-                this.setCaretOffsetInField(target, finalOffset);
-                this.forceRefocusAndCursor(target);
-                this.refreshFieldOutline();
-                this.drawBlockCursor();
-                this.updateDebugIfVisible();
-            };
-
-            refocus();
-            setTimeout(refocus, 0);
-            setTimeout(refocus, 80);
-            setTimeout(refocus, 180);
-            setTimeout(refocus, 360);
-        },
-
-        extendVisualSelection: function (direction, granularity) {
-            const field = this.ensureField();
-
-            if (!field) {
-                this.lastAction = "visual move failed: no field";
-                return;
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const text = control.value || "";
-                const anchor =
-                    this.visualAnchorOffset === null
-                        ? control.selectionStart || 0
-                        : this.visualAnchorOffset;
-
-                let focus = control.selectionEnd || 0;
-
-                if (granularity === "character") {
-                    focus += direction === "forward" ? 1 : -1;
-                } else if (granularity === "line") {
-                    this.moveControlSelection(control, direction, "line");
-                    focus = control.selectionStart || focus;
-                }
-
-                focus = Math.max(0, Math.min(focus, text.length));
-
-                try {
-                    control.setSelectionRange(
-                        Math.min(anchor, focus),
-                        Math.max(anchor, focus),
-                    );
-                } catch (error) {}
-
-                this.safeSyncLine("extend visual control", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                return;
-            }
-
-            const sel = window.getSelection();
-
-            if (!sel || sel.rangeCount === 0) {
-                return;
-            }
-
-            try {
-                sel.modify("extend", direction, granularity);
-                this.safeSyncLine("extend visual dom", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-            } catch (error) {
-                console.log("[Anki Vim] visual extend failed", error);
-                this.lastAction = "visual extend failed: " + error;
-            }
-        },
-
-        getSelectionText: function () {
-            const field = this.currentField();
-            const control = field ? this.editorControl(field) : null;
-
-            if (control) {
-                return control.value.slice(
-                    control.selectionStart || 0,
-                    control.selectionEnd || 0,
-                );
-            }
-
-            // Read from the shadow-root selection so the selected text is the
-            // real content inside the field, not the retargeted host range.
-            const sel = this.editableSelection(field);
-
-            if (!sel || sel.rangeCount === 0) {
-                return "";
-            }
-
-            return sel.toString();
-        },
-
-        yankSelection: function () {
-            const text = this.getSelectionText();
-
-            if (!text) {
-                this.lastAction = "nothing selected to yank";
-                return;
-            }
-
-            this.yankText = text;
-            this.yankIsLine = false;
-            this.lastAction = "yanked selection: " + JSON.stringify(text);
-        },
-
-        deleteSelection: function () {
-            const field = this.currentField();
-            const control = field ? this.editorControl(field) : null;
-
-            if (control) {
-                const start = control.selectionStart || 0;
-                const end = control.selectionEnd || 0;
-                const selected = control.value.slice(start, end);
-
-                if (!selected) {
-                    this.lastAction =
-                        "delete selection failed: empty selection";
-                    return;
-                }
-
-                this.yankText = selected;
-                this.yankIsLine = false;
-
-                const newText =
-                    control.value.slice(0, start) + control.value.slice(end);
-
-                this.replaceFieldPlainText(
-                    field,
-                    newText,
-                    start,
-                    "deleteContentForward",
-                );
-
-                this.pythonCaretOffset = start;
-                this.lastAction =
-                    "deleted selection: " + JSON.stringify(selected);
-                return;
-            }
-
-            const text = this.getSelectionText();
-
-            if (!text) {
-                this.lastAction = "delete selection failed: empty selection";
-                return;
-            }
-
-            this.yankText = text;
-            this.yankIsLine = false;
-
-            try {
-                document.execCommand("delete", false, null);
-                this.pythonCaretOffset = field
-                    ? this.getCaretOffsetInField(field)
-                    : this.pythonCaretOffset;
-                this.safeSyncLine("delete visual dom", {
-                    allowPointer: false,
-                    allowDom: true,
-                    allowFakeZero: false,
-                });
-                this.forceVirtualBlockCursor(1400, "visual delete");
-                this.lastAction =
-                    "deleted selection: " + JSON.stringify(this.yankText);
-            } catch (error) {
-                this.lastAction = "delete selection failed: " + error;
-            }
-        },
-
-        pasteYankText: function (op) {
-            this.sendPythonLineOp(op || "p");
-        },
-
-        openLineBelow: function () {
-            const field = this.ensureField();
-
-            if (!field) {
-                this.lastAction = "open line failed: no field";
-                return;
-            }
-
-            this.safeSyncLine("before open line below", {
-                allowPointer: true,
-                allowDom: true,
-                allowFakeZero: false,
-            });
-
-            const targetLine = Math.max(
-                0,
-                (Number(this.vimLineIndex) || 0) + 1,
-            );
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const text = control.value || "";
-                const caret = control.selectionStart || 0;
-                const bounds = this.getLineBounds(text, caret, false);
-                const insertAt = bounds.end;
-                const newText =
-                    text.slice(0, insertAt) + "\n" + text.slice(insertAt);
-
-                control.value = newText;
-                this.dispatchInputForField(field, "insertLineBreak", "\n");
-
-                try {
-                    control.focus({ preventScroll: true });
-                } catch (error) {
-                    control.focus();
-                }
-
-                try {
-                    control.setSelectionRange(insertAt + 1, insertAt + 1);
-                } catch (error) {}
-
-                this.vimLineIndex = targetLine;
-                this.lockLineSync(targetLine, 1800, "open line below control");
-
-                this.lastAction = "opened line below";
-                this.setMode("insert");
-                return;
-            }
-
-            const sel = window.getSelection();
-
-            try {
-                sel.modify("move", "forward", "lineboundary");
-                document.execCommand("insertLineBreak");
-
-                this.vimLineIndex = targetLine;
-                this.lockLineSync(targetLine, 1800, "open line below dom");
-
-                this.setMode("insert");
-                this.lastAction = "opened line below";
-            } catch (error) {
-                console.log("[Anki Vim] openLineBelow failed", error);
-                this.lastAction = "open line failed: " + error;
-            }
-
-            this.updateDebugIfVisible();
-        },
-
-        nextField: function () {
-            const fields = this.fields();
-            let index = this.fieldIndex;
-
-            const field = this.currentField();
-            const currentIndex = fields.indexOf(field);
-
-            if (currentIndex !== -1) {
-                index = currentIndex;
-            }
-
-            const resolvedIndex = index + 1 >= fields.length ? 0 : index + 1;
-
-            this.lastAction =
-                "next field from index " +
-                index +
-                " to " +
-                resolvedIndex +
-                " total=" +
-                fields.length;
-
-            this.nativeFocusField(resolvedIndex, true);
-        },
-
-        previousField: function () {
-            const fields = this.fields();
-            let index = this.fieldIndex;
-
-            const field = this.currentField();
-            const currentIndex = fields.indexOf(field);
-
-            if (currentIndex !== -1) {
-                index = currentIndex;
-            }
-
-            const resolvedIndex = index - 1 < 0 ? fields.length - 1 : index - 1;
-
-            this.lastAction =
-                "previous field from index " +
-                index +
-                " to " +
-                resolvedIndex +
-                " total=" +
-                fields.length;
-
-            this.nativeFocusField(resolvedIndex, true);
-        },
-
-        refreshFieldOutline: function () {
-            const fields = this.fields();
-
-            for (const field of fields) {
-                field.classList.remove("anki-vim-field-active");
-            }
-
-            const index = Math.min(this.fieldIndex, fields.length - 1);
-
-            if (fields[index]) {
-                fields[index].classList.add("anki-vim-field-active");
-            }
-        },
-
-        getOrCreateBlockCursor: function () {
-            let cursor = document.getElementById("anki-vim-block-cursor");
-
-            if (!cursor) {
-                cursor = document.createElement("div");
-                cursor.id = "anki-vim-block-cursor";
-                document.body.appendChild(cursor);
-            }
-
-            return cursor;
-        },
-
-        removeBlockCursor: function () {
-            const cursor = document.getElementById("anki-vim-block-cursor");
-
-            if (cursor) {
-                cursor.style.display = "none";
-            }
-        },
-
-        // The normal-mode block cursor is a real 1-character selection of the
-        // glyph under the caret (styled like a block). Because it IS the
-        // selection, it can never drift from the real caret position.
-
-        // Collapse the block back to the caret. We always anchor the block at
-        // the caret, so collapsing to the anchor restores a plain caret there.
-        collapseBlockToCursor: function () {
-            const field = this.currentField();
-
-            if (!field) {
-                return;
-            }
-
-            const sel = this.editableSelection(field);
-
-            if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-                return;
-            }
-
-            try {
-                sel.collapse(sel.anchorNode, sel.anchorOffset);
-            } catch (error) {}
-        },
-
-        placeBlockCaret: function () {
-            if (this.mode !== "normal") {
-                return;
-            }
-
-            const field = this.currentField();
-
-            if (!field) {
-                return;
-            }
-
-            const sel = this.editableSelection(field);
-
-            if (!sel || sel.rangeCount === 0) {
-                return;
-            }
-
-            // Already a single-character block on one line: leave it alone so
-            // we don't fight selectionchange events (infinite re-place loop).
-            let current = "";
-
-            try {
-                current = sel.toString();
-            } catch (error) {}
-
-            if (
-                !sel.isCollapsed &&
-                current.length === 1 &&
-                current !== "\n"
-            ) {
-                return;
-            }
-
-            // Start from the caret (anchor) and cover the character to the
-            // right. At end of line that would grab the newline, so fall back
-            // to covering the character to the left; on an empty line, leave a
-            // plain caret.
-            try {
-                sel.collapse(sel.anchorNode, sel.anchorOffset);
-                sel.modify("extend", "forward", "character");
-
-                let text = "";
-
-                try {
-                    text = sel.toString();
-                } catch (error) {}
-
-                if (text === "" || text.indexOf("\n") !== -1) {
-                    sel.collapse(sel.anchorNode, sel.anchorOffset);
-                    sel.modify("extend", "backward", "character");
-
-                    let back = "";
-
-                    try {
-                        back = sel.toString();
-                    } catch (error) {}
-
-                    if (back === "" || back.indexOf("\n") !== -1) {
-                        sel.collapse(sel.anchorNode, sel.anchorOffset);
-                    }
-                }
-            } catch (error) {}
-        },
-
-        drawBlockCursorSoon: function () {
-            setTimeout(() => {
-                this.placeBlockCaret();
-            }, 0);
-        },
-
-        getVirtualCaretRect: function (field) {
-            if (!field) {
-                return null;
-            }
-
-            const rect = field.getBoundingClientRect();
-            const style = window.getComputedStyle(field);
-            const paddingTop = parseFloat(style.paddingTop || "0") || 0;
-            const paddingLeft = parseFloat(style.paddingLeft || "0") || 0;
-            const lineHeight = this.lineHeightPx(field);
-            const lineIndex = Math.max(0, Number(this.vimLineIndex) || 0);
-
-            return {
-                left: rect.left + paddingLeft + 3,
-                top:
-                    rect.top +
-                    paddingTop +
-                    lineHeight * lineIndex +
-                    Math.max(0, (lineHeight - 18) / 2),
-                width: 9,
-                height: Math.max(18, Math.min(lineHeight, 24)),
-            };
-        },
-
-        getCaretRect: function () {
-            const field = this.currentField();
-
-            if (!field) {
-                return null;
-            }
-
-            const useVirtual =
-                Date.now() < this.virtualBlockCursorUntil ||
-                Date.now() < this.lineSyncLockUntil;
-
-            if (useVirtual) {
-                const virtualRect = this.getVirtualCaretRect(field);
-
-                if (virtualRect) {
-                    return virtualRect;
-                }
-            }
-
-            const control = this.editorControl(field);
-
-            if (control) {
-                const pos = control.selectionStart || 0;
-
-                try {
-                    const mirror = document.createElement("div");
-                    const style = window.getComputedStyle(control);
-
-                    mirror.style.position = "fixed";
-                    mirror.style.visibility = "hidden";
-                    mirror.style.whiteSpace = "pre-wrap";
-                    mirror.style.wordWrap = "break-word";
-                    mirror.style.overflow = "hidden";
-                    mirror.style.font = style.font;
-                    mirror.style.fontSize = style.fontSize;
-                    mirror.style.fontFamily = style.fontFamily;
-                    mirror.style.fontWeight = style.fontWeight;
-                    mirror.style.letterSpacing = style.letterSpacing;
-                    mirror.style.lineHeight = style.lineHeight;
-                    mirror.style.padding = style.padding;
-                    mirror.style.border = style.border;
-                    mirror.style.boxSizing = style.boxSizing;
-                    mirror.style.width =
-                        control.getBoundingClientRect().width + "px";
-
-                    const before = document.createTextNode(
-                        control.value.slice(0, pos),
-                    );
-                    const marker = document.createElement("span");
-                    marker.textContent =
-                        control.value.slice(pos, pos + 1) || " ";
-
-                    mirror.appendChild(before);
-                    mirror.appendChild(marker);
-                    document.body.appendChild(mirror);
-
-                    const controlRect = control.getBoundingClientRect();
-                    const markerRect = marker.getBoundingClientRect();
-                    const mirrorRect = mirror.getBoundingClientRect();
-
-                    const rect = {
-                        left:
-                            controlRect.left +
-                            (markerRect.left - mirrorRect.left) -
-                            control.scrollLeft,
-                        top:
-                            controlRect.top +
-                            (markerRect.top - mirrorRect.top) -
-                            control.scrollTop,
-                        width: Math.max(markerRect.width || 9, 9),
-                        height: Math.max(markerRect.height || 18, 18),
-                    };
-
-                    mirror.remove();
-                    return rect;
-                } catch (error) {}
-            }
-
-            // Read the real caret from the field's shadow-root selection. A
-            // collapsed range still reports a correct top/left/height (just
-            // zero width), so we never mutate the editable to measure it.
-            const sel = this.editableSelection(field);
-            const editable = this.editableElement(field);
-
-            if (sel && sel.rangeCount > 0) {
-                try {
-                    const range = sel.getRangeAt(0).cloneRange();
-
-                    if (
-                        editable.contains(range.startContainer) ||
-                        editable === range.startContainer
-                    ) {
-                        range.collapse(true);
-
-                        let rect = range.getBoundingClientRect();
-
-                        if (!rect || (!rect.top && !rect.left)) {
-                            const rects = range.getClientRects();
-
-                            if (rects && rects.length) {
-                                rect = rects[0];
-                            }
-                        }
-
-                        if (rect && (rect.top || rect.left)) {
-                            return {
-                                left: rect.left,
-                                top: rect.top,
-                                width: 9,
-                                height: Math.max(rect.height || 18, 18),
-                            };
-                        }
-                    }
-                } catch (error) {}
-            }
-
-            const virtualRect = this.getVirtualCaretRect(field);
-
-            if (virtualRect) {
-                return virtualRect;
-            }
-
-            const r = field.getBoundingClientRect();
-
-            return {
-                left: r.left + 5,
-                top: r.top + 5,
-                width: 9,
-                height: Math.min(Math.max(r.height - 10, 18), 22),
-            };
-        },
-
-        drawBlockCursor: function () {
-            this.removeBlockCursor();
-            this.placeBlockCaret();
-        },
-
-        selectionInfo: function () {
-            const field = this.currentField();
-            const control = field ? this.editorControl(field) : null;
-
-            if (control) {
-                return (
-                    "control=" +
-                    this.describeEl(control) +
-                    " selectionStart=" +
-                    control.selectionStart +
-                    " selectionEnd=" +
-                    control.selectionEnd +
-                    " valueLen=" +
-                    control.value.length
-                );
-            }
-
-            const sel = window.getSelection();
-
-            if (!sel || sel.rangeCount === 0) {
-                return "no selection";
-            }
-
-            const range = sel.getRangeAt(0);
-            let node = range.startContainer;
-
-            let nodeDesc = "";
-
-            if (node.nodeType === Node.TEXT_NODE) {
-                nodeDesc =
-                    "TEXT len=" +
-                    node.textContent.length +
-                    " text=" +
-                    JSON.stringify(node.textContent.slice(0, 40));
-            } else {
-                nodeDesc = this.describeEl(node);
-            }
-
-            return (
-                "anchorOffset=" +
-                sel.anchorOffset +
-                " focusOffset=" +
-                sel.focusOffset +
-                " collapsed=" +
-                sel.isCollapsed +
-                " rangeStart=" +
-                range.startOffset +
-                " rangeEnd=" +
-                range.endOffset +
-                " node=" +
-                nodeDesc
-            );
-        },
-
-        toggleDebug: function () {
-            this.debugVisible = !this.debugVisible;
-
-            let el = document.getElementById("anki-vim-debug");
+        if (!el || !el.isConnected) {
+            el = document.getElementById("anki-vim-block-cursor");
 
             if (!el) {
                 el = document.createElement("div");
-                el.id = "anki-vim-debug";
+                el.id = "anki-vim-block-cursor";
                 document.body.appendChild(el);
             }
 
-            if (!this.debugVisible) {
-                el.style.display = "none";
-                return;
+            V.cursorEl = el;
+        }
+
+        const field = V.field;
+        const m = V.model;
+
+        if (
+            V.mode === "insert" ||
+            V.cmdline ||
+            !field ||
+            !m ||
+            m.root !== field ||
+            activeField() !== field
+        ) {
+            el.style.display = "none";
+            return;
+        }
+
+        let rect;
+
+        try {
+            rect = cursorRect(m, T.clamp(V.pos, 0, m.text.length));
+        } catch (error) {
+            el.style.display = "none";
+            return;
+        }
+
+        if (allowScroll && ensureVisible(field, rect)) {
+            rect = cursorRect(m, T.clamp(V.pos, 0, m.text.length));
+        }
+
+        // The block is opaque and re-draws the character it covers in
+        // inverted colours. That also hides the browser's own thin caret,
+        // which must not be hidden with CSS: `caret-color` set on the field
+        // gets copied into the note's HTML when the browser merges lines.
+        const pos = T.clamp(V.pos, 0, m.text.length);
+        const ch = pos < m.text.length ? m.text[pos] : "\n";
+        const c = m.chars[pos];
+        const source =
+            c && c.k === "t" && c.n.parentElement ? c.n.parentElement : field;
+        const style = getComputedStyle(source);
+        const fontSize = parseFloat(style.fontSize) || 16;
+        const atom = ch === ATOM;
+        let glyph = "";
+
+        if (!atom && ch !== "\n" && !T.isBlankChar(ch)) {
+            const code = ch.charCodeAt(0);
+            const next = m.text[pos + 1];
+
+            glyph =
+                code >= 0xd800 && code <= 0xdbff && next ? ch + next : ch;
+        }
+
+        el.textContent = glyph;
+        el.classList.toggle("anki-vim-cursor-atom", atom);
+        el.style.display = "block";
+        el.style.left = rect.left + "px";
+        el.style.top = rect.top + "px";
+        el.style.width = (rect.width > 1 ? rect.width : fontSize * 0.55) + "px";
+        el.style.height = rect.height + "px";
+        el.style.lineHeight = rect.height + "px";
+        el.style.fontFamily = style.fontFamily;
+        el.style.fontSize = style.fontSize;
+        el.style.fontWeight = style.fontWeight;
+        el.style.fontStyle = style.fontStyle;
+        el.style.background = atom ? "" : style.color;
+        el.style.color = atom ? "" : backgroundOf(field);
+    }
+
+    function backgroundOf(el) {
+        let node = el;
+
+        while (node) {
+            const bg = getComputedStyle(node).backgroundColor;
+            const alpha = /^rgba\(.*,\s*0\)$/.test(bg) || bg === "transparent";
+
+            if (bg && !alpha) {
+                return bg;
             }
 
-            el.style.display = "block";
-            this.updateDebug();
-        },
+            node =
+                node.parentElement ||
+                (node.getRootNode() && node.getRootNode().host) ||
+                null;
+        }
 
-        updateDebugIfVisible: function () {
-            if (this.debugVisible) {
-                this.updateDebug();
+        return "Canvas";
+    }
+
+    function queueDraw() {
+        drawCursor(true);
+    }
+
+    // ======================================================================
+    // Event handling
+    // ======================================================================
+
+    function swallow(event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }
+
+    function resolveField(allowFocus) {
+        const field = activeField();
+
+        if (field) {
+            V.field = field;
+            V.lastField = field;
+            return field;
+        }
+
+        if (!allowFocus) {
+            return null;
+        }
+
+        // Nothing focused at all (not another widget): return to a field.
+        const a = deepActive();
+
+        if (a && a !== document.body && a !== document.documentElement) {
+            return null;
+        }
+
+        const target =
+            V.lastField && V.lastField.isConnected
+                ? V.lastField
+                : allFields()[0];
+
+        if (!target) {
+            return null;
+        }
+
+        focusField(target);
+        return target;
+    }
+
+    function insertKey(event, key) {
+        if (key === "<Esc>" || key === "<C-[>") {
+            swallow(event);
+            exitInsert();
+            return;
+        }
+
+        const seq = config.insert_escape;
+
+        if (seq && seq.length === 2) {
+            const now = performance.now();
+
+            if (
+                key === seq[1] &&
+                V.escapeArmed &&
+                now - V.escapeArmed < config.insert_escape_timeout_ms
+            ) {
+                const m = remodel();
+
+                if (
+                    m &&
+                    m.caret !== null &&
+                    m.caret > 0 &&
+                    m.text[m.caret - 1] === seq[0]
+                ) {
+                    swallow(event);
+                    deleteRange(m.caret - 1, m.caret);
+                    V.escapeArmed = 0;
+                    exitInsert();
+                    return;
+                }
             }
-        },
 
-        updateDebug: function () {
-            let el = document.getElementById("anki-vim-debug");
+            V.escapeArmed = key === seq[0] ? now : 0;
+        }
+    }
 
-            if (!el) {
-                return;
+    function onKeydown(event) {
+        if (event.isComposing || event.keyCode === 229) {
+            return;
+        }
+
+        const key = keyName(event);
+
+        if (!key) {
+            return;
+        }
+
+        if (V.cmdline) {
+            if (key !== PASS) {
+                swallow(event);
+                cmdlineKey(key);
             }
 
-            const candidates = this.candidateFields();
-            const fields = this.fields();
-            const active = document.activeElement;
-            const field = this.currentField();
-            const control = field ? this.editorControl(field) : null;
-            const fieldText = field ? this.getFieldPlainText(field) : "";
-            const caretOffset = field ? this.getCaretOffsetInField(field) : -1;
-            const domLine = field
-                ? this.getCaretLineIndexFromDomSelection(field)
-                : null;
+            return;
+        }
 
-            const lines = [];
+        if (V.mode === "insert") {
+            if (resolveField(false)) {
+                insertKey(event, key);
+            }
 
-            lines.push("Anki Vim Debug");
-            lines.push("version: " + this.version);
-            lines.push("mode: " + this.mode);
-            lines.push("lastKey: " + this.lastKey);
-            lines.push("lastAction: " + this.lastAction);
-            lines.push("active: " + this.describeEl(active));
-            lines.push("currentField: " + this.describeEl(field));
-            lines.push("editorControl: " + this.describeEl(control));
-            lines.push("selection: " + this.selectionInfo());
-            lines.push("candidate fields: " + candidates.length);
-            lines.push("usable fields: " + fields.length);
-            lines.push("fieldIndex: " + this.fieldIndex);
-            lines.push("vimLineIndex: " + this.vimLineIndex);
-            lines.push("domLineIndex: " + domLine);
-            lines.push("lastPointerLineIndex: " + this.lastPointerLineIndex);
-            lines.push(
-                "lastInternalLineMoveTime: " + this.lastInternalLineMoveTime,
-            );
-            lines.push("lineSyncLockUntil: " + this.lineSyncLockUntil);
-            lines.push("lockedVimLineIndex: " + this.lockedVimLineIndex);
-            lines.push(
-                "virtualBlockCursorUntil: " + this.virtualBlockCursorUntil,
-            );
-            lines.push(
-                "virtualBlockCursorReason: " + this.virtualBlockCursorReason,
-            );
-            lines.push(
-                "jsLineCountDebugOnly: " +
-                    this.getCurrentFieldLineCountDebugOnly(),
-            );
-            lines.push("pendingOperator: " + this.pendingOperator);
-            lines.push("yankText: " + JSON.stringify(this.yankText));
-            lines.push("yankIsLine: " + this.yankIsLine);
-            lines.push("caretOffset: " + caretOffset);
-            lines.push("pythonCaretOffset: " + this.pythonCaretOffset);
-            lines.push("fieldText: " + JSON.stringify(fieldText.slice(0, 300)));
-            lines.push("");
+            return;
+        }
 
-            candidates.forEach((candidate, i) => {
-                const r = candidate.getBoundingClientRect();
-                const controlForCandidate = this.editorControl(candidate);
-                const controlText = controlForCandidate
-                    ? controlForCandidate.value || ""
-                    : "";
+        if (key === PASS) {
+            return;
+        }
 
-                lines.push(
-                    i +
-                        ": " +
-                        this.describeEl(candidate) +
-                        " top=" +
-                        Math.round(r.top) +
-                        " left=" +
-                        Math.round(r.left) +
-                        " w=" +
-                        Math.round(r.width) +
-                        " h=" +
-                        Math.round(r.height) +
-                        " control=" +
-                        this.describeEl(controlForCandidate) +
-                        " controlText=" +
-                        JSON.stringify(controlText.slice(0, 80)),
+        if (key.startsWith("<C-") && !NORMAL_CTRL.has(key)) {
+            return;
+        }
+
+        if (!resolveField(true)) {
+            return;
+        }
+
+        swallow(event);
+        feedKey(key);
+    }
+
+    // Called from Python, which intercepts Esc before the webview sees it
+    // (otherwise Esc would close the Add Cards window).
+    function escape() {
+        if (V.cmdline) {
+            if (isVisual()) {
+                setModeNormal();
+            }
+
+            closeCmdline();
+            return;
+        }
+
+        if (!activeField()) {
+            const a = deepActive();
+
+            // Let Anki's own widgets (tag editor, MathJax editor, ...) see it.
+            if (a && a !== document.body) {
+                a.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                        key: "Escape",
+                        code: "Escape",
+                        keyCode: 27,
+                        bubbles: true,
+                        cancelable: true,
+                        composed: true,
+                    }),
                 );
-            });
-
-            el.textContent = lines.join("\n");
-        },
-
-        describeEl: function (el) {
-            if (!el) {
-                return "null";
             }
 
-            const tag = el.tagName ? el.tagName.toLowerCase() : "?";
-            const id = el.id ? "#" + el.id : "";
-            const cls =
-                typeof el.className === "string" && el.className
-                    ? "." + el.className.split(/\s+/).slice(0, 6).join(".")
-                    : "";
-            const role = el.getAttribute ? el.getAttribute("role") || "" : "";
-            const aria = el.getAttribute
-                ? el.getAttribute("aria-label") || ""
-                : "";
-            const ce = el.getAttribute
-                ? el.getAttribute("contenteditable") || ""
-                : "";
+            return;
+        }
 
-            return (
-                tag + id + cls + " role=" + role + " aria=" + aria + " ce=" + ce
-            );
+        if (V.mode === "insert") {
+            exitInsert();
+            return;
+        }
+
+        resolveField(false);
+        feedKey("<Esc>");
+    }
+
+    let selectionTimer = 0;
+
+    function onSelectionChange() {
+        if (V.mode === "insert" || V.cmdline) {
+            return;
+        }
+
+        clearTimeout(selectionTimer);
+        selectionTimer = setTimeout(() => {
+            const field = activeField();
+
+            if (!field || V.mode === "insert" || V.cmdline) {
+                drawCursor(false);
+                return;
+            }
+
+            V.field = field;
+            V.lastField = field;
+
+            if (isVisual() || stampMatches(field)) {
+                return;
+            }
+
+            const sel = getSel(field);
+
+            if (!sel || !sel.isCollapsed) {
+                return;
+            }
+
+            // The caret was moved by something else (mouse, Anki, arrows).
+            sync();
+            placeCursor();
+            updateStatus();
+        }, 0);
+    }
+
+    function onMouseUp() {
+        setTimeout(() => {
+            const field = activeField();
+
+            if (!field || V.mode === "insert" || V.cmdline) {
+                return;
+            }
+
+            V.field = field;
+            V.lastField = field;
+
+            const m = remodel();
+
+            if (!m || m.anchor === null || m.caret === null) {
+                return;
+            }
+
+            if (m.anchor !== m.caret) {
+                // A mouse drag in normal mode becomes a visual selection.
+                V.mode = "visual";
+                V.vAnchor = Math.min(
+                    m.anchor < m.caret ? m.anchor : m.anchor - 1,
+                    m.text.length,
+                );
+                V.pos = Math.max(0, m.caret > m.anchor ? m.caret - 1 : m.caret);
+            } else {
+                V.mode = "normal";
+                V.pos = T.clampNormal(m.text, m.caret);
+                V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+            }
+
+            placeCursor();
+            updateStatus();
+        }, 0);
+    }
+
+    function onFocusIn() {
+        setTimeout(() => {
+            const field = activeField();
+
+            if (field) {
+                V.field = field;
+                V.lastField = field;
+
+                if (V.mode !== "insert" && !isVisual()) {
+                    sync();
+                    placeCursor();
+                }
+            }
+
+            drawCursor(false);
+        }, 0);
+    }
+
+    function redrawSoon() {
+        if (V.drawQueued) {
+            return;
+        }
+
+        V.drawQueued = true;
+        requestAnimationFrame(() => {
+            V.drawQueued = false;
+
+            if (V.mode !== "insert" && V.field && activeField() === V.field) {
+                remodel();
+            }
+
+            drawCursor(false);
+        });
+    }
+
+    function applyConfig(next) {
+        for (const key of Object.keys(config)) {
+            if (next && next[key] !== undefined && next[key] !== null) {
+                config[key] = next[key];
+            }
+        }
+
+        updateStatus();
+    }
+
+    function init() {
+        applyConfig(window.ankiVimConfig || {});
+
+        document.addEventListener("keydown", onKeydown, true);
+        document.addEventListener("selectionchange", onSelectionChange, true);
+        document.addEventListener("mouseup", onMouseUp, true);
+        document.addEventListener("focusin", onFocusIn, true);
+        document.addEventListener("focusout", () => setTimeout(() => drawCursor(false), 0), true);
+        document.addEventListener("input", redrawSoon, true);
+        window.addEventListener("scroll", redrawSoon, true);
+        window.addEventListener("resize", redrawSoon, true);
+
+        V.mode = config.start_in_insert ? "insert" : "normal";
+        updateStatus();
+
+        const field = activeField();
+
+        if (field) {
+            V.field = field;
+            V.lastField = field;
+
+            if (V.mode === "normal") {
+                sync();
+                placeCursor();
+            }
+        }
+    }
+
+    window.ankiVim = {
+        version: VERSION,
+        applyConfig,
+        escape,
+        setClipboard: function (text) {
+            V.clipboardText = typeof text === "string" ? text : "";
         },
+        // Called by Python after a note is (re)loaded into the editor.
+        noteLoaded: function () {
+            V.undo.length = 0;
+            V.redo.length = 0;
+            V.change = null;
+            V.stamp = null;
+            redrawSoon();
+        },
+        setMode: function (mode) {
+            if (mode === "normal") {
+                if (V.mode === "insert") {
+                    exitInsert();
+                } else {
+                    setModeNormal();
+                    updateStatus();
+                }
+            } else if (mode === "insert" && V.mode !== "insert") {
+                if (resolveField(true) && sync()) {
+                    enterInsert(V.pos);
+                }
+            }
+        },
+        message: showMessage,
+        // Introspection used by the test-suite.
+        _state: V,
+        _internals: { buildModel, domPos, parse, remodel, sync, placeCursor, focusField, config },
     };
 
-    window.ankiVim.init();
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init, { once: true });
+    } else {
+        init();
+    }
 })();

@@ -1,3 +1,10 @@
 {
-  "enable_in_browser": true
+  "enable_in_browser": true,
+  "insert_escape": "",
+  "insert_escape_timeout_ms": 400,
+  "jk_display_lines": false,
+  "shift_jk_fields": true,
+  "show_status": true,
+  "start_in_insert": false,
+  "system_clipboard": false
 }

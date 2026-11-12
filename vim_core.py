@@ -1,18 +1,91 @@
 # vim_core.py
+#
+# Python side of Anki Vim Mode. All editing happens in the editor webview
+# (vim_text.js + editor_vim.js); this file only:
+#   - injects those scripts and the user's config into each editor,
+#   - turns Esc into "leave insert mode" instead of "close the window",
+#   - runs the ex commands that need Anki (:w, :wq, :q, :help),
+#   - bridges the system clipboard for the "+ register.
 
 import json
 import os
 
-from aqt import gui_hooks
-from aqt.qt import QObject, QEvent, Qt, QApplication, QTimer
-from aqt.utils import tooltip
-
-from .command_line import VimCommandLine
-from .line_ops import VimLineOps
+from aqt import gui_hooks, mw
+from aqt.qt import QApplication, QEvent, QKeyEvent, QObject, Qt, QTimer
+from aqt.utils import showText, tooltip
 
 ADDON_DIR = os.path.dirname(__file__)
-JS_PATH = os.path.join(ADDON_DIR, "editor_vim.js")
-CSS_PATH = os.path.join(ADDON_DIR, "editor_vim.css")
+ADDON_PACKAGE = __name__.split(".")[0]
+SCRIPTS = ["vim_text.js", "editor_vim.js"]
+CSS_FILE = "editor_vim.css"
+MESSAGE_PREFIX = "anki_vim:"
+MAX_CLIPBOARD_CHARS = 200_000
+
+DEFAULT_CONFIG = {
+    "enable_in_browser": True,
+    "shift_jk_fields": True,
+    "insert_escape": "",
+    "insert_escape_timeout_ms": 400,
+    "start_in_insert": False,
+    "system_clipboard": False,
+    "jk_display_lines": False,
+    "show_status": True,
+}
+
+HELP_TEXT = """Anki Vim Mode
+
+MODES
+  Esc / Ctrl-[        normal mode          i a I A o O     insert
+  v                   visual               V               visual line
+
+MOVING
+  h j k l             left/down/up/right   w b e  W B E    words
+  0 ^ $               line start/end       gg G  {n}G      first/last/line n
+  f F t T {char}      find on line         ; ,             repeat find
+  { }                 paragraphs           %               matching bracket
+  gj gk               display lines        J K             next/previous field
+
+EDITING
+  d c y {motion}      delete/change/yank   dd cc yy        whole lines
+  x X s S D C Y       shortcuts            p P             paste after/before
+  r{char}  ~          replace / flip case  gu gU g~        change case
+  gJ                  join lines           .               repeat last change
+  u  Ctrl-r           undo / redo          "{reg}          use a register
+
+TEXT OBJECTS (after d c y v, with i = inner, a = around)
+  w W                 word                 " ' `           quotes
+  ( [ { <             brackets             p               paragraph
+  c                   cloze deletion: cic changes the answer of {{c1::...}}
+
+SEARCH AND COMMANDS
+  /text  ?text        search               n N  * #        next/previous/word
+  :s/old/new/g        replace on line      :%s/old/new/g   replace in field
+  :w                  add / save note      :wq  :q         and close / close
+  :{n}                go to line n         :reg            show registers
+
+A count works in front of most commands: 3dd, 2dw, 5j, d3w.
+Settings: Tools > Add-ons > Anki Vim Mode > Config.
+"""
+
+
+def load_config():
+    config = dict(DEFAULT_CONFIG)
+
+    try:
+        user = mw.addonManager.getConfig(ADDON_PACKAGE) or {}
+    except Exception:
+        user = {}
+
+    for key, value in user.items():
+        if value is not None:
+            config[key] = value
+
+    return config
+
+
+def read_addon_file(name):
+    with open(os.path.join(ADDON_DIR, name), "r", encoding="utf-8") as f:
+        return f.read()
 
 
 class VimModeController(QObject):
@@ -22,55 +95,223 @@ class VimModeController(QObject):
 
         super().__init__(self.window)
 
-        # Add Cards uses `:w` to add the note; other editors save inline.
         self.is_add_mode = bool(getattr(editor, "addMode", False))
-        self.mode = "normal"
-        self.command_line = VimCommandLine(self.window, self)
-        self.line_ops = VimLineOps()
+        self.alive = True
 
-        if self.window is not None:
-            self.window.installEventFilter(self)
-
-        self.editor.web.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
-
-        # Anki hook objects are not iterable in newer Anki/PyQt builds.
-        # Do not use: `if callback not in gui_hooks...`
         gui_hooks.webview_did_receive_js_message.append(self.on_js_message)
+        gui_hooks.editor_did_load_note.append(self.on_note_loaded)
 
-        # Remove our message hook when the window goes away so editors opened
-        # later do not accumulate dead handlers.
+        try:
+            QApplication.clipboard().dataChanged.connect(self.push_clipboard)
+        except Exception:
+            pass
+
         if self.window is not None:
             try:
-                self.window.destroyed.connect(self.remove_hooks)
+                self.window.destroyed.connect(self.teardown)
             except Exception:
                 pass
 
-        self.inject_repeatedly()
+        self.inject()
 
-    def remove_hooks(self, *args):
-        try:
-            gui_hooks.webview_did_receive_js_message.remove(self.on_js_message)
-        except Exception:
-            pass
+    # Setup / teardown
+    ######################################################################
 
-    def save_note(self):
-        if self.is_add_mode and self.window is not None:
-            try:
-                self.window.addCards()
-                tooltip("Card added")
-            except Exception as error:
-                tooltip(f"Could not add card: {error}")
+    def teardown(self, *args):
+        if not self.alive:
             return
 
-        # Editing an existing note: edits are persisted as fields change, so
-        # just flush the current field and confirm.
+        self.alive = False
+
+        for hook, callback in (
+            (gui_hooks.webview_did_receive_js_message, self.on_js_message),
+            (gui_hooks.editor_did_load_note, self.on_note_loaded),
+        ):
+            try:
+                hook.remove(callback)
+            except Exception:
+                pass
+
         try:
-            self.editor.call_after_note_saved(lambda: None, keepFocus=True)
+            QApplication.clipboard().dataChanged.disconnect(self.push_clipboard)
         except Exception:
             pass
 
-        tooltip("Saved")
+        try:
+            QApplication.instance().removeEventFilter(self)
+        except Exception:
+            pass
+
+    def web(self):
+        if not self.alive:
+            return None
+
+        return getattr(self.editor, "web", None)
+
+    def run_js(self, js):
+        web = self.web()
+
+        if web is None:
+            return
+
+        try:
+            web.eval(js)
+        except Exception:
+            # The webview was deleted underneath us.
+            self.teardown()
+
+    def inject(self):
+        try:
+            css = read_addon_file(CSS_FILE)
+            scripts = [read_addon_file(name) for name in SCRIPTS]
+        except OSError as error:
+            tooltip(f"Anki Vim Mode: could not load its files: {error}")
+            return
+
+        css_js = """
+(function () {
+    let style = document.getElementById("anki-vim-css");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "anki-vim-css";
+        document.head.appendChild(style);
+    }
+    style.textContent = %s;
+})();
+""" % json.dumps(css)
+
+        config_js = "window.ankiVimConfig = %s;" % json.dumps(load_config())
+
+        # The scripts are no-ops when this version is already running in the
+        # page, so injecting again (e.g. after a note loads) is safe.
+        self.run_js("\n;\n".join([css_js, config_js] + scripts))
+        self.push_clipboard()
+
+    def on_note_loaded(self, editor):
+        if editor is not self.editor:
+            return
+
+        self.inject()
+        self.run_js("if (window.ankiVim) { window.ankiVim.noteLoaded(); }")
+
+    # Clipboard bridge for the "+ and "* registers
+    ######################################################################
+
+    def push_clipboard(self):
+        try:
+            text = QApplication.clipboard().text() or ""
+        except Exception:
+            return
+
+        if len(text) > MAX_CLIPBOARD_CHARS:
+            text = ""
+
+        self.run_js(
+            "if (window.ankiVim) { window.ankiVim.setClipboard(%s); }"
+            % json.dumps(text)
+        )
+
+    # Commands from the webview
+    ######################################################################
+
+    def on_js_message(self, handled, message, context):
+        # This hook is global: only react to messages from our own editor.
+        if context is not self.editor:
+            return handled
+
+        if not isinstance(message, str) or not message.startswith(MESSAGE_PREFIX):
+            return handled
+
+        try:
+            payload = json.loads(message[len(MESSAGE_PREFIX) :])
+            command = payload.get("cmd")
+        except Exception:
+            return (True, None)
+
+        if command == "w":
+            self.save_note()
+        elif command == "wq":
+            self.save_note(then_close=True)
+        elif command == "q":
+            self.close_window()
+        elif command == "clip":
+            try:
+                QApplication.clipboard().setText(str(payload.get("text", "")))
+            except Exception:
+                pass
+        elif command == "help":
+            self.show_help()
+
+        return (True, None)
+
+    def show_help(self):
+        options = dict(
+            parent=self.window, title="Anki Vim Mode", minWidth=720, minHeight=560
+        )
+
+        try:
+            # Monospace view; not available on older Anki versions.
+            showText(HELP_TEXT, plain_text_edit=True, **options)
+        except TypeError:
+            showText(HELP_TEXT, **options)
+
+    def save_note(self, then_close=False):
+        after = self.close_window if then_close else None
+
+        if self.is_add_mode:
+            self.add_note()
+
+            if after:
+                # Adding is asynchronous; give it a moment before closing.
+                QTimer.singleShot(400, after)
+
+            return
+
+        def saved():
+            tooltip("Saved", parent=self.window)
+
+            if after:
+                after()
+
+        try:
+            self.editor.call_after_note_saved(saved, keepFocus=True)
+        except Exception:
+            saved()
+
+    def add_note(self):
+        window = self.window
+
+        # Classic Add Cards window.
+        for name in ("add_current_note", "addCards"):
+            method = getattr(window, name, None)
+
+            if callable(method):
+                try:
+                    method()
+                except Exception as error:
+                    tooltip(f"Could not add card: {error}", parent=window)
+
+                return
+
+        # The new (Svelte) editor adds notes from inside the page, where the
+        # Add button listens for Ctrl+Enter. Send it that key press.
+        web = self.web()
+        target = web.focusProxy() if web is not None else None
+
+        if target is None:
+            tooltip("Could not add card", parent=window)
+            return
+
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            QApplication.postEvent(
+                target,
+                QKeyEvent(
+                    event_type,
+                    Qt.Key.Key_Return,
+                    Qt.KeyboardModifier.ControlModifier,
+                ),
+            )
 
     def close_window(self):
         try:
@@ -79,356 +320,55 @@ class VimModeController(QObject):
         except Exception:
             pass
 
-    def web(self):
-        try:
-            editor = getattr(self, "editor", None)
-            if editor is None:
-                return None
+    # Esc handling
+    ######################################################################
 
-            web = getattr(editor, "web", None)
-            if web is None:
-                return None
-
-            return web
-        except Exception:
-            return None
-
-    def is_web_alive(self):
-        return self.web() is not None
-
-    def read_file(self, path):
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def inject_css(self):
-        web = self.web()
-
-        if web is None:
-            return
-
-        if not os.path.exists(CSS_PATH):
-            return
-
-        try:
-            css = self.read_file(CSS_PATH)
-        except Exception:
-            return
-
-        js = f"""
-        (function() {{
-            let style = document.getElementById("anki-vim-css");
-
-            if (!style) {{
-                style = document.createElement("style");
-                style.id = "anki-vim-css";
-                document.head.appendChild(style);
-            }}
-
-            style.textContent = {css!r};
-        }})();
-        """
-
-        try:
-            web.eval(js)
-        except Exception:
-            pass
-
-    def inject_js(self):
-        web = self.web()
-
-        if web is None:
-            return
-
-        if not os.path.exists(JS_PATH):
-            return
-
-        try:
-            js = self.read_file(JS_PATH)
-        except Exception:
-            return
-
-        try:
-            web.eval(js)
-        except Exception:
-            pass
-
-    def inject_all(self):
-        if not self.is_web_alive():
-            return
-
-        self.inject_css()
-        self.inject_js()
-
-    def inject_repeatedly(self):
-        self.inject_all()
-
-        QTimer.singleShot(300, self.inject_all)
-        QTimer.singleShot(1000, self.inject_all)
-        QTimer.singleShot(2000, self.inject_all)
-        QTimer.singleShot(4000, self.inject_all)
-
-    def run_js(self, js):
+    def focus_is_in_editor(self):
         web = self.web()
 
         if web is None:
             return False
 
         try:
-            web.eval(js)
-            return True
-        except Exception:
-            return False
+            widget = QApplication.focusWidget()
 
-    def set_mode(self, mode):
-        self.mode = mode
-        self.run_js(f"""
-            if (window.ankiVim && window.ankiVim.setMode) {{
-                window.ankiVim.setMode({json.dumps(mode)});
-                window.ankiVim.updateDebugIfVisible();
-            }}
-        """)
+            while widget is not None:
+                if widget is web:
+                    return True
 
-    def is_window_active(self):
-        try:
-            return QApplication.activeWindow() is self.window
-        except Exception:
-            return False
+                widget = widget.parentWidget()
+        except RuntimeError:
+            # Wrapped C++ object was deleted.
+            self.teardown()
 
-    def is_shift_j(self, key, modifiers):
-        return (
-            key == Qt.Key.Key_J
-            and modifiers & Qt.KeyboardModifier.ShiftModifier
-            and not modifiers & Qt.KeyboardModifier.ControlModifier
-            and not modifiers & Qt.KeyboardModifier.AltModifier
-            and not modifiers & Qt.KeyboardModifier.MetaModifier
-        )
-
-    def is_shift_k(self, key, modifiers):
-        return (
-            key == Qt.Key.Key_K
-            and modifiers & Qt.KeyboardModifier.ShiftModifier
-            and not modifiers & Qt.KeyboardModifier.ControlModifier
-            and not modifiers & Qt.KeyboardModifier.AltModifier
-            and not modifiers & Qt.KeyboardModifier.MetaModifier
-        )
-
-    def current_field_index(self):
-        index = None
-
-        try:
-            index = self.editor.currentField
-        except Exception:
-            index = None
-
-        if index is None:
-            try:
-                index = self.editor.last_field_index
-            except Exception:
-                index = None
-
-        if index is None:
-            index = 0
-
-        try:
-            return int(index)
-        except Exception:
-            return 0
-
-    def set_current_field_index(self, index):
-        try:
-            index = int(index)
-        except Exception:
-            index = 0
-
-        try:
-            self.editor.currentField = index
-            self.editor.last_field_index = index
-        except Exception:
-            pass
-
-        return index
-
-    def save_current_then(self, callback):
-        if not self.is_web_alive():
-            return
-
-        try:
-            self.editor.call_after_note_saved(callback, keepFocus=True)
-        except TypeError:
-            try:
-                self.editor.call_after_note_saved(callback)
-            except Exception:
-                callback()
-        except Exception:
-            callback()
-
-    def reload_field(self, index):
-        if not self.is_web_alive():
-            return
-
-        self.set_current_field_index(index)
-
-        try:
-            self.editor.loadNote(index)
-        except Exception:
-            try:
-                self.editor.loadNoteKeepingFocus()
-            except Exception:
-                pass
-
-        QTimer.singleShot(80, self.inject_all)
-        QTimer.singleShot(180, self.inject_all)
-        QTimer.singleShot(360, self.inject_all)
-
-    def send_line_result(self, result):
-        if not self.is_web_alive():
-            return False
-
-        js = f"""
-        (function() {{
-            if (window.ankiVim && window.ankiVim.receivePythonLineOp) {{
-                window.ankiVim.receivePythonLineOp({json.dumps(result)});
-            }}
-        }})();
-        """
-
-        return self.run_js(js)
-
-    def send_line_result_later(self, result, delay=180):
-        def later():
-            if self.is_web_alive():
-                self.send_line_result(result)
-
-        QTimer.singleShot(delay, later)
-
-    def do_python_line_op(self, payload):
-        if not self.is_web_alive():
-            return
-
-        try:
-            note = self.editor.note
-        except Exception:
-            note = None
-
-        fallback_field_index = self.current_field_index()
-
-        result, changed = self.line_ops.process(
-            note=note,
-            payload=payload,
-            fallback_field_index=fallback_field_index,
-        )
-
-        field_index = result.get("fieldIndex", fallback_field_index)
-        self.set_current_field_index(field_index)
-
-        if changed:
-            self.reload_field(field_index)
-            self.send_line_result_later(result, 180)
-        else:
-            self.send_line_result(result)
-
-    def on_js_message(self, handled, message, context):
-        # This hook is global; only handle messages from our own editor so
-        # multiple open editors do not cross-talk.
-        if context is not self.editor:
-            return handled
-
-        if not isinstance(message, str):
-            return handled
-
-        if message.startswith("focus:"):
-            try:
-                index = int(message[len("focus:") :])
-                self.set_current_field_index(index)
-            except Exception:
-                pass
-
-            return (True, None)
-
-        if message.startswith("vimmode:"):
-            self.mode = message[len("vimmode:") :]
-            return (True, None)
-
-        if not message.startswith("anki_vim:"):
-            return handled
-
-        if not self.is_web_alive():
-            return (True, None)
-
-        try:
-            payload = json.loads(message[len("anki_vim:") :])
-        except Exception as error:
-            self.send_line_result(
-                {
-                    "ok": False,
-                    "error": "bad json: " + str(error),
-                    "action": "bad json",
-                }
-            )
-            return (True, None)
-
-        self.save_current_then(lambda: self.do_python_line_op(payload))
-        return (True, None)
+        return False
 
     def eventFilter(self, obj, event):
         event_type = event.type()
 
-        if event_type not in [
+        if event_type not in (
             QEvent.Type.ShortcutOverride,
             QEvent.Type.KeyPress,
-        ]:
+        ):
             return False
 
-        if not self.is_window_active():
+        if event.key() != Qt.Key.Key_Escape or event.modifiers() not in (
+            Qt.KeyboardModifier.NoModifier,
+            Qt.KeyboardModifier.KeypadModifier,
+        ):
             return False
 
-        key = event.key()
-        text = event.text()
-        modifiers = event.modifiers()
-
-        # IMPORTANT:
-        # Shift+J and Shift+K are handled in editor_vim.js, not here.
-        # If Qt catches them here, insert mode cannot type capital J/K.
-        shift_j = self.is_shift_j(key, modifiers)
-        shift_k = self.is_shift_k(key, modifiers)
-
-        if shift_j or shift_k:
+        # Only while typing in this editor's fields. Everywhere else (the
+        # Browser's search bar, dialogs, ...) Esc keeps its normal meaning.
+        if not self.focus_is_in_editor():
             return False
 
-        if key == Qt.Key.Key_Escape:
-            event.accept()
-            self.mode = "normal"
-            self.run_js("""
-                if (window.ankiVim) {
-                    if (window.ankiVim.mode === "visual" && window.ankiVim.exitVisualMode) {
-                        window.ankiVim.exitVisualMode(false);
-                    } else {
-                        window.ankiVim.setMode("normal");
-                    }
+        event.accept()
 
-                    window.ankiVim.lastAction = "python escape -> normal";
-                    window.ankiVim.updateDebugIfVisible();
-                }
-            """)
-            return True
+        if event_type == QEvent.Type.KeyPress:
+            self.run_js("if (window.ankiVim) { window.ankiVim.escape(); }")
 
-        # Only the colon command line is a Python-side normal-mode shortcut.
-        # In insert/visual mode ":" must reach the editor so it can be typed.
-        is_colon = text == ":" or key == Qt.Key.Key_Colon
-
-        if event_type == QEvent.Type.ShortcutOverride:
-            if is_colon and self.mode == "normal":
-                event.accept()
-                return True
-
-            return False
-
-        if is_colon and self.mode == "normal":
-            event.accept()
-            self.command_line.open()
-            return True
-
-        return False
+        return True
 
 
 def install_vim_mode(editor):
