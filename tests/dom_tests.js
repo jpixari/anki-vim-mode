@@ -51,7 +51,7 @@
         I.config.insert_escape = "";
         I.config.system_clipboard = false;
         I.config.jk_display_lines = false;
-        I.config.cursor_color = "#51afef";
+        I.config.cursor_color = "auto";
         I.config.cursor_blink = false;
         I.config.cursor_min_width = 0;
         V.windowFocused = true;
@@ -1477,10 +1477,12 @@
         };
     }
 
-    const BLUE = "rgb(81, 175, 239)";
+    // doom-one-light's cursor blue (the test page is light) and doom-one's.
+    const BLUE = "rgb(64, 120, 242)";
+    const BLUE_ON_DARK = "rgb(81, 175, 239)";
 
     // The shapes and the single colour are Doom Emacs's.
-    test("cursor: box in normal, bar in insert, hollow in visual", () => {
+    test("cursor: box in normal, hollow in visual, none in insert", () => {
         setup("abc def", 0);
         eq(cursor().shown, true, "shown");
         eq(cursor().shape, "block");
@@ -1497,19 +1499,12 @@
         feed("<Esc>");
         eq(cursor().shape, "block");
 
+        // Insert mode keeps the browser's own caret.
         feed("i");
-        eq(cursor().shown, true, "shown in insert");
-        eq(cursor().shape, "bar");
-        eq(cursor().bg, BLUE, "same colour in insert");
-        eq(cursor().rect.width, 2, "bar width");
-
-        const before = cursor().rect.left;
-
-        feed("xy");
-        I.drawCursor(false);
-        eq(cursor().rect.left > before, true, "bar follows the caret");
-        feed("<Esc>");
-        eq(cursor().shape, "block", "back in normal");
+        eq(cursor().shown, false, "hidden in insert");
+        feed("xy<Esc>");
+        eq(cursor().shown, true, "back in normal");
+        eq(cursor().shape, "block");
         expect("xyabc def", 1);
     });
 
@@ -1571,11 +1566,53 @@
         eq(cursor().glyph, "b");
         eq(V.pos, 1, "position kept");
 
-        feed("i");
-        window.dispatchEvent(new Event("blur"));
-        eq(cursor().shown, false, "hidden in insert too");
-        window.dispatchEvent(new Event("focus"));
+    });
+
+    test("cursor: colour follows a light or dark field", () => {
+        const host = field(0).getRootNode().host;
+
+        setup("abc", 0);
+        eq(cursor().bg, BLUE, "light field");
+        host.style.background = "#2c2c2c";
+        host.style.color = "#eeeeee";
+        I.drawCursor(false);
+        eq(cursor().bg, BLUE_ON_DARK, "dark field");
+        eq(cursor().el.style.color, "rgb(44, 44, 44)", "letter in field colour");
+        host.style.background = "";
+        host.style.color = "";
+    });
+
+    test("cursor: whole character with accents, tint on images", () => {
+        setup("cafe\u0301 x", 3);
+        eq(cursor().glyph, "e\u0301", "combining accent kept");
+        setup("a \ud83d\udc4d\ud83c\udffd b", 2);
+        eq(cursor().glyph, "\ud83d\udc4d\ud83c\udffd", "emoji with modifier");
+
+        setup('x<img src="data:," style="width:20px;height:20px">y', 1);
+        eq(cursor().glyph, "", "no glyph on an image");
+        eq(cursor().bg, "rgba(0, 0, 0, 0)", "image stays visible");
+        eq(/inset/.test(cursor().el.style.boxShadow), true, "frame and tint");
+        feed("l");
+        eq(cursor().el.style.boxShadow, "", "plain block again");
+    });
+
+    test("cursor: not drawn outside the visible part of the field", () => {
+        const host = field(0).getRootNode().host;
+
+        setup("one<br>two<br>three<br>four", 0);
+        host.style.cssText = "display:block;overflow:hidden;height:30px";
+        feed("G");
+        eq(cursor().shown, false, "hidden below the clipped area");
+        feed("gg");
+        eq(cursor().shown, true, "shown inside it");
+        feed("<C-q>G$");
+        eq(
+            document.querySelectorAll("#anki-vim-block-select > div").length < 4,
+            true,
+            "block rows outside are skipped",
+        );
         feed("<Esc>");
+        host.style.cssText = "";
     });
 
     test("cursor: colour, blink and minimum width options", () => {

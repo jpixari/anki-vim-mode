@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
     "show_status": True,
     "status_position": "bottom-left",
     "vim_ctrl_keys": False,
-    "cursor_color": "#51afef",
+    "cursor_color": "auto",
     "cursor_blink": False,
     "cursor_min_width": 0,
 }

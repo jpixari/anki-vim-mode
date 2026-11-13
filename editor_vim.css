@@ -109,12 +109,6 @@ body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
   user-select: none;
 }
 
-/* On images and MathJax there is no glyph to redraw: invert what is there. */
-#anki-vim-block-cursor.anki-vim-cursor-atom {
-  background: rgba(255, 255, 255, 0.95);
-  mix-blend-mode: difference;
-}
-
 /* Optional blinking (cursor_blink): shown, then hidden, in steps. */
 #anki-vim-block-cursor.anki-vim-cursor-blink {
   animation: anki-vim-cursor-blink 1.1s step-end infinite;

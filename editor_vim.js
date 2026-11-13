@@ -62,7 +62,7 @@
         show_status: true,
         status_position: "bottom-left",
         vim_ctrl_keys: false,
-        cursor_color: "#51afef",
+        cursor_color: "auto",
         cursor_blink: false,
         cursor_min_width: 0,
     };
@@ -4606,11 +4606,21 @@
             parseFloat(style.lineHeight) ||
             (parseFloat(style.fontSize) || 16) * 1.3;
 
+        // An empty field has nothing to measure. Use a box about as tall as
+        // a letter, centred in the line, so it matches the cursor elsewhere.
+        const height = Math.min(
+            lineHeight,
+            (parseFloat(style.fontSize) || 16) * 1.15,
+        );
+
         return {
             left: rootRect.left + (parseFloat(style.paddingLeft) || 0),
-            top: rootRect.top + (parseFloat(style.paddingTop) || 0),
+            top:
+                rootRect.top +
+                (parseFloat(style.paddingTop) || 0) +
+                (lineHeight - height) / 2,
             width: 0,
-            height: lineHeight,
+            height,
         };
     }
 
@@ -4669,6 +4679,64 @@
         return false;
     }
 
+    // The overlays are fixed to the window, so they would otherwise stay
+    // visible on top of the toolbar when their text scrolls out of the
+    // fields area. This is the part of the window the field can show in.
+    function visibleArea(field) {
+        const area = {
+            left: 0,
+            top: 0,
+            right: window.innerWidth,
+            bottom: window.innerHeight,
+        };
+        let node = field;
+
+        while (node) {
+            const parent =
+                node.parentElement ||
+                (node.getRootNode() && node.getRootNode().host) ||
+                null;
+
+            if (!parent || parent === document.body) {
+                break;
+            }
+
+            const style = getComputedStyle(parent);
+
+            if (style.overflowY !== "visible" || style.overflowX !== "visible") {
+                const r = parent.getBoundingClientRect();
+
+                area.left = Math.max(area.left, r.left);
+                area.top = Math.max(area.top, r.top);
+                area.right = Math.min(area.right, r.right);
+                area.bottom = Math.min(area.bottom, r.bottom);
+            }
+
+            node = parent;
+        }
+
+        return area;
+    }
+
+    // CSS clip-path that cuts a box down to the visible area: "" when it
+    // is fully visible, null when nothing of it is.
+    function clipTo(area, left, top, width, height) {
+        const cut = [
+            Math.max(0, area.top - top),
+            Math.max(0, left + width - area.right),
+            Math.max(0, top + height - area.bottom),
+            Math.max(0, area.left - left),
+        ];
+
+        if (cut[0] + cut[2] >= height || cut[1] + cut[3] >= width) {
+            return null;
+        }
+
+        return cut.some((c) => c > 0)
+            ? "inset(" + cut.map((c) => c + "px").join(" ") + ")"
+            : "";
+    }
+
     // Visual block has no native equivalent (a browser selection is one
     // continuous range), so its rectangles are drawn as an overlay.
     function drawBlockSelection() {
@@ -4694,6 +4762,8 @@
             return;
         }
 
+        const area = visibleArea(m.root);
+
         for (const row of blockInfo(m).rows) {
             if (row.a >= row.b) {
                 continue;
@@ -4715,7 +4785,21 @@
                     continue;
                 }
 
+                const clip = clipTo(
+                    area,
+                    rect.left,
+                    rect.top,
+                    rect.width,
+                    rect.height,
+                );
+
+                if (clip === null) {
+                    continue;
+                }
+
                 const div = document.createElement("div");
+
+                div.style.clipPath = clip;
 
                 div.style.left = rect.left + "px";
                 div.style.top = rect.top + "px";
@@ -4746,8 +4830,10 @@
         const field = V.field;
         let m = V.model;
 
-        // Like Doom Emacs, no cursor at all while the window is unfocused.
+        // Insert mode keeps the browser's own caret. Like Doom Emacs, there
+        // is no cursor at all while the window is unfocused.
         if (
+            V.mode === "insert" ||
             !V.windowFocused ||
             V.cmdline ||
             !field ||
@@ -4759,7 +4845,7 @@
 
         let pos;
 
-        if (inInsert()) {
+        if (V.mode === "replace") {
             // Typing goes straight to the field here, so follow the caret.
             m = remodel();
 
@@ -4787,7 +4873,7 @@
             return;
         }
 
-        if (allowScroll && !inInsert() && ensureVisible(field, rect)) {
+        if (allowScroll && ensureVisible(field, rect)) {
             rect = cursorRect(m, pos);
         }
 
@@ -4809,11 +4895,7 @@
         // field gets copied into the note's HTML when the browser merges
         // lines.
         if (block && ch !== ATOM && ch !== "\n" && !T.isBlankChar(ch)) {
-            const code = ch.charCodeAt(0);
-            const next = m.text[pos + 1];
-
-            glyph =
-                code >= 0xd800 && code <= 0xdbff && next ? ch + next : ch;
+            glyph = graphemeAt(m.text, pos);
         }
 
         // Proportional fonts make the cursor as narrow as the letter under
@@ -4825,9 +4907,7 @@
         let height = rect.height;
         let widened = false;
 
-        if (shape === "bar") {
-            width = 2;
-        } else if (rect.width > 1 && width < minWidth) {
+        if (rect.width > 1 && width < minWidth) {
             left -= (minWidth - width) / 2;
             width = minWidth;
             widened = true;
@@ -4841,8 +4921,14 @@
 
         top += rect.height - height;
 
-        const colour = cursorColour(style);
+        const colour = cursorColour(style, field);
         const hollow = shape === "hollow";
+        const clip = clipTo(visibleArea(field), left, top, width, height);
+
+        if (clip === null) {
+            el.style.display = "none";
+            return;
+        }
 
         el.textContent = glyph;
         el.dataset.shape = shape;
@@ -4859,9 +4945,18 @@
         el.style.fontSize = style.fontSize;
         el.style.fontWeight = style.fontWeight;
         el.style.fontStyle = style.fontStyle;
+        el.style.clipPath = clip;
         el.style.border = hollow ? "1px solid " + colour : "";
-        el.style.background = hollow ? "transparent" : atom ? "" : colour;
-        el.style.color = atom ? "" : backgroundOf(field);
+        // The hollow box sits on the selection, whose colour can be close to
+        // the cursor's: a white inner line keeps it visible there.
+        el.style.outline = hollow ? "1px solid rgba(255, 255, 255, 0.85)" : "";
+        el.style.outlineOffset = hollow ? "-2px" : "";
+        el.style.background = hollow || atom ? "transparent" : colour;
+        el.style.color = inkOn(colour, field, style);
+        // Images and MathJax: a frame and a tint in the cursor's colour.
+        el.style.boxShadow = atom
+            ? "inset 0 0 0 2px " + colour + ", inset 0 0 0 100vmax " + tint(colour)
+            : "";
 
         // A cursor that just moved is shown solid before it blinks again.
         const key = [left, top, shape].join("|");
@@ -4877,15 +4972,10 @@
 
     // The shapes Doom Emacs (evil) uses for each state:
     //   block      normal mode (`box`)
-    //   bar        insert mode (`bar`, 2px)
     //   hollow     visual modes (`hollow`)
     //   half       an operator is waiting for its motion (`evil-half-cursor`)
     //   underline  replace mode and a pending r (`hbar`, 2px)
     function cursorShape() {
-        if (V.mode === "insert") {
-            return "bar";
-        }
-
         if (V.mode === "replace") {
             return "underline";
         }
@@ -4903,22 +4993,128 @@
         return isVisual() ? "hollow" : "block";
     }
 
-    // One colour in every mode, as in Doom: doom-one's cursor blue.
-    const CURSOR_COLOUR = "#51afef";
+    // One colour in every mode, as in Doom Emacs: the cursor blue of
+    // doom-one on dark fields and of doom-one-light on light ones.
+    const CURSOR_ON_DARK = "#51afef";
+    const CURSOR_ON_LIGHT = "#4078f2";
 
-    // cursor_color: a CSS colour, or "text" for the text colour.
-    function cursorColour(style) {
+    // cursor_color: "auto", a CSS colour, or "text" for the text colour.
+    function cursorColour(style, field) {
         const wanted = String(config.cursor_color || "").trim();
 
         if (wanted === "text") {
             return style.color;
         }
 
-        if (wanted && typeof CSS !== "undefined" && CSS.supports("color", wanted)) {
+        if (
+            wanted &&
+            wanted !== "auto" &&
+            typeof CSS !== "undefined" &&
+            CSS.supports("color", wanted)
+        ) {
             return wanted;
         }
 
-        return CURSOR_COLOUR;
+        return isDark(field) ? CURSOR_ON_DARK : CURSOR_ON_LIGHT;
+    }
+
+    // [r, g, b] of a computed colour such as "rgb(81, 175, 239)".
+    function rgbOf(colour) {
+        const match = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(colour);
+
+        return match ? [+match[1], +match[2], +match[3]] : null;
+    }
+
+    function isDark(field) {
+        const rgb = rgbOf(backgroundOf(field));
+
+        if (!rgb) {
+            return document.documentElement.classList.contains("night-mode");
+        }
+
+        return brightness(rgb) < 128;
+    }
+
+    function brightness(rgb) {
+        // Perceived brightness, 0 (black) to 255 (white).
+        return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+    }
+
+    // [r, g, b] of any CSS colour, resolved by the browser.
+    function resolve(colour) {
+        const probe = V.cursorEl;
+        const before = probe.style.color;
+
+        probe.style.color = colour;
+
+        const rgb = rgbOf(getComputedStyle(probe).color);
+
+        probe.style.color = before;
+        return rgb;
+    }
+
+    // Colour for the letter inside the box: the field's background or its
+    // text colour, whichever stands out more against the cursor.
+    function inkOn(colour, field, style) {
+        const background = backgroundOf(field);
+        const block = resolve(colour);
+        const a = rgbOf(background);
+        const b = rgbOf(style.color);
+
+        if (!block || !a || !b) {
+            return background;
+        }
+
+        const level = brightness(block);
+
+        return Math.abs(brightness(a) - level) >= Math.abs(brightness(b) - level)
+            ? background
+            : style.color;
+    }
+
+    // The colour at about a third strength, to lay over an image.
+    function tint(colour) {
+        const rgb = resolve(colour);
+
+        return rgb
+            ? "rgba(" + rgb.join(", ") + ", 0.35)"
+            : "rgba(81, 175, 239, 0.35)";
+    }
+
+    let segmenter;
+
+    // The whole character at pos as the reader sees it: a letter with its
+    // combining accents, or an emoji made of several code points.
+    function graphemeAt(text, pos) {
+        let end = pos + 1;
+
+        while (
+            end < text.length &&
+            end < pos + 24 &&
+            text[end] !== "\n" &&
+            text[end] !== ATOM
+        ) {
+            end++;
+        }
+
+        const slice = text.slice(pos, end);
+
+        if (segmenter === undefined) {
+            segmenter =
+                typeof Intl !== "undefined" && Intl.Segmenter
+                    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+                    : null;
+        }
+
+        if (segmenter) {
+            for (const part of segmenter.segment(slice)) {
+                return part.segment;
+            }
+        }
+
+        const code = slice.charCodeAt(0);
+
+        return code >= 0xd800 && code <= 0xdbff ? slice.slice(0, 2) : slice[0];
     }
 
     function backgroundOf(el) {
@@ -5175,13 +5371,13 @@
     let selectionTimer = 0;
 
     function onSelectionChange() {
-        if (inInsert() && !V.cmdline) {
-            // Keep the bar / underline on the caret (arrow keys, mouse).
+        if (V.mode === "replace" && !V.cmdline) {
+            // Keep the underline on the caret (arrow keys, mouse).
             redrawSoon();
             return;
         }
 
-        if (V.cmdline) {
+        if (inInsert() || V.cmdline) {
             return;
         }
 
