@@ -62,7 +62,7 @@
         show_status: true,
         status_position: "bottom-left",
         vim_ctrl_keys: false,
-        cursor_color: "auto",
+        cursor_color: "text",
         cursor_blink: false,
         cursor_min_width: 0,
     };
@@ -4993,17 +4993,19 @@
         return isVisual() ? "hollow" : "block";
     }
 
-    // One colour in every mode, as in Doom Emacs: the cursor blue of
-    // doom-one on dark fields and of doom-one-light on light ones.
+    // cursor_color "auto": a blue for dark fields and a darker one for
+    // light fields (the cursor colours of doom-one and doom-one-light).
     const CURSOR_ON_DARK = "#51afef";
     const CURSOR_ON_LIGHT = "#4078f2";
 
-    // cursor_color: "auto", a CSS colour, or "text" for the text colour.
+    // cursor_color: "text" (the default), "auto" or a CSS colour.
     function cursorColour(style, field) {
         const wanted = String(config.cursor_color || "").trim();
 
         if (wanted === "text") {
-            return style.color;
+            // The field's own text colour, not the colour of the letter
+            // under the cursor, so it stays the same on coloured text.
+            return getComputedStyle(field).color;
         }
 
         if (

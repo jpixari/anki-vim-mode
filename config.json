@@ -1,6 +1,6 @@
 {
   "cursor_blink": false,
-  "cursor_color": "auto",
+  "cursor_color": "text",
   "cursor_min_width": 0,
   "enable_in_browser": true,
   "insert_escape": "",

@@ -1477,7 +1477,8 @@
         };
     }
 
-    // doom-one-light's cursor blue (the test page is light) and doom-one's.
+    // The "auto" blues: for a light field (the test page) and a dark one.
+    // The tests run with cursor_color "auto"; the default is "text".
     const BLUE = "rgb(64, 120, 242)";
     const BLUE_ON_DARK = "rgb(81, 175, 239)";
 
@@ -1625,6 +1626,12 @@
         I.config.cursor_color = "text";
         I.drawCursor(false);
         eq(cursor().bg, getComputedStyle(field(0)).color, "text colour");
+
+        setup('a <span style="color: rgb(255, 0, 0)">red</span>', 2);
+        I.config.cursor_color = "text";
+        I.drawCursor(false);
+        eq(cursor().bg, getComputedStyle(field(0)).color, "not the letter's colour");
+        setup("iii", 1);
 
         I.config.cursor_color = "#ff0000";
         I.drawCursor(false);
