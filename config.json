@@ -1,4 +1,7 @@
 {
+  "cursor_blink": false,
+  "cursor_color": "mode",
+  "cursor_min_width": 0,
   "enable_in_browser": true,
   "insert_escape": "",
   "insert_escape_timeout_ms": 400,

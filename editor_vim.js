@@ -62,6 +62,9 @@
         show_status: true,
         status_position: "bottom-left",
         vim_ctrl_keys: false,
+        cursor_color: "mode",
+        cursor_blink: false,
+        cursor_min_width: 0,
     };
 
     // ======================================================================
@@ -438,6 +441,8 @@
         insertReg: false,
         history: { ":": [], "/": [] },
         drawQueued: false,
+        windowFocused: true,
+        cursorKey: "",
     };
 
     // ======================================================================
@@ -3811,9 +3816,12 @@
             if (V.keys.length > 0) {
                 V.keys = [];
                 updateStatus();
+                drawCursor(false);
                 return;
             }
         }
+
+        const shapeBefore = pendingKind();
 
         V.keys.push(key);
 
@@ -3821,6 +3829,11 @@
 
         if (result.status === "incomplete") {
             updateStatus();
+
+            if (pendingKind() !== shapeBefore) {
+                drawCursor(false);
+            }
+
             return;
         }
 
@@ -3833,6 +3846,43 @@
         } else {
             updateStatus();
         }
+
+        // The cursor showed a pending shape (half block / underline): a
+        // command that changed nothing would otherwise leave it on screen.
+        if (shapeBefore) {
+            drawCursor(false);
+        }
+    }
+
+    // What the keys typed so far are waiting for: "operator" (d, c, y, ...
+    // need a motion), "replace" (r needs a character) or "".
+    function pendingKind() {
+        const keys = V.keys;
+        let i = 0;
+
+        while (keys[i] === '"') {
+            i += 2;
+        }
+
+        while (i < keys.length && /^[0-9]$/.test(keys[i])) {
+            i++;
+        }
+
+        if (i >= keys.length) {
+            return "";
+        }
+
+        let k = keys[i];
+
+        if (PREFIX_KEYS.has(k) && i + 1 < keys.length) {
+            k += keys[i + 1];
+        }
+
+        if (k === "r") {
+            return "replace";
+        }
+
+        return OPERATORS.has(k) ? "operator" : "";
     }
 
     // ======================================================================
@@ -4694,48 +4744,68 @@
         }
 
         const field = V.field;
-        const m = V.model;
+        let m = V.model;
 
         if (
-            inInsert() ||
+            V.mode === "insert" ||
             V.cmdline ||
             !field ||
-            !m ||
-            m.root !== field ||
             activeField() !== field
         ) {
             el.style.display = "none";
             return;
         }
 
+        let pos;
+
+        if (V.mode === "replace") {
+            // Typing goes straight to the field here, so follow the caret.
+            m = remodel();
+
+            if (!m || m.caret === null) {
+                el.style.display = "none";
+                return;
+            }
+
+            pos = m.caret;
+        } else {
+            if (!m || m.root !== field) {
+                el.style.display = "none";
+                return;
+            }
+
+            pos = T.clamp(V.pos, 0, m.text.length);
+        }
+
         let rect;
 
         try {
-            rect = cursorRect(m, T.clamp(V.pos, 0, m.text.length));
+            rect = cursorRect(m, pos);
         } catch (error) {
             el.style.display = "none";
             return;
         }
 
         if (allowScroll && ensureVisible(field, rect)) {
-            rect = cursorRect(m, T.clamp(V.pos, 0, m.text.length));
+            rect = cursorRect(m, pos);
         }
 
         // The block is opaque and re-draws the character it covers in
-        // inverted colours. That also hides the browser's own thin caret,
+        // other colours. That also hides the browser's own thin caret,
         // which must not be hidden with CSS: `caret-color` set on the field
         // gets copied into the note's HTML when the browser merges lines.
-        const pos = T.clamp(V.pos, 0, m.text.length);
         const ch = pos < m.text.length ? m.text[pos] : "\n";
         const c = m.chars[pos];
         const source =
             c && c.k === "t" && c.n.parentElement ? c.n.parentElement : field;
         const style = getComputedStyle(source);
         const fontSize = parseFloat(style.fontSize) || 16;
-        const atom = ch === ATOM;
+        const shape = cursorShape();
+        const hollow = shape === "hollow";
+        const atom = ch === ATOM && !hollow;
         let glyph = "";
 
-        if (!atom && ch !== "\n" && !T.isBlankChar(ch)) {
+        if (!hollow && ch !== ATOM && ch !== "\n" && !T.isBlankChar(ch)) {
             const code = ch.charCodeAt(0);
             const next = m.text[pos + 1];
 
@@ -4743,20 +4813,113 @@
                 code >= 0xd800 && code <= 0xdbff && next ? ch + next : ch;
         }
 
+        // Proportional fonts make the block as narrow as the letter under
+        // it; cursor_min_width (in em) widens it around the letter's centre.
+        const minWidth = fontSize * (Number(config.cursor_min_width) || 0);
+        let width = rect.width > 1 ? rect.width : fontSize * 0.55;
+        let left = rect.left;
+        let widened = false;
+
+        if (rect.width > 1 && width < minWidth) {
+            left -= (minWidth - width) / 2;
+            width = minWidth;
+            widened = true;
+        }
+
+        const colours = cursorColours(style, field);
+
         el.textContent = glyph;
+        el.dataset.shape = shape;
         el.classList.toggle("anki-vim-cursor-atom", atom);
+        el.classList.toggle(
+            "anki-vim-cursor-blink",
+            !!config.cursor_blink && !hollow,
+        );
         el.style.display = "block";
-        el.style.left = rect.left + "px";
+        el.style.left = left + "px";
         el.style.top = rect.top + "px";
-        el.style.width = (rect.width > 1 ? rect.width : fontSize * 0.55) + "px";
+        el.style.width = width + "px";
         el.style.height = rect.height + "px";
         el.style.lineHeight = rect.height + "px";
+        el.style.textAlign = widened ? "center" : "left";
         el.style.fontFamily = style.fontFamily;
         el.style.fontSize = style.fontSize;
         el.style.fontWeight = style.fontWeight;
         el.style.fontStyle = style.fontStyle;
-        el.style.background = atom ? "" : style.color;
-        el.style.color = atom ? "" : backgroundOf(field);
+        el.style.border = hollow ? "1px solid " + colours.block : "";
+        el.style.background = hollow ? "transparent" : atom ? "" : colours.block;
+        el.style.color = atom ? "" : colours.ink;
+        // Half block and underline are the full block cut down to its lower
+        // part, so the character above the cut stays readable.
+        el.style.clipPath =
+            shape === "half"
+                ? "inset(50% 0 0 0)"
+                : shape === "underline"
+                  ? "inset(82% 0 0 0)"
+                  : "";
+
+        // A cursor that just moved is shown solid before it blinks again.
+        const key = [left, rect.top, shape].join("|");
+
+        if (config.cursor_blink && key !== V.cursorKey) {
+            el.style.animation = "none";
+            void el.offsetWidth;
+            el.style.animation = "";
+        }
+
+        V.cursorKey = key;
+    }
+
+    // block: normal. half: an operator is waiting for its motion.
+    // underline: r / replace mode. hollow: the window is not focused.
+    function cursorShape() {
+        if (!V.windowFocused) {
+            return "hollow";
+        }
+
+        if (V.mode === "replace") {
+            return "underline";
+        }
+
+        const kind = pendingKind();
+
+        return kind === "replace"
+            ? "underline"
+            : kind === "operator"
+              ? "half"
+              : "block";
+    }
+
+    const CURSOR_COLOURS = {
+        normal: "#98be65",
+        visual: "#ecbe7b",
+        replace: "#ff6c6b",
+    };
+    const CURSOR_INK = "#282c34";
+
+    // cursor_color: "mode" (the badge's colour for the current mode),
+    // "text" (the text colour, as reverse video) or any CSS colour.
+    function cursorColours(style, field) {
+        const wanted = String(config.cursor_color || "mode").trim();
+
+        if (wanted === "text") {
+            return { block: style.color, ink: backgroundOf(field) };
+        }
+
+        if (
+            wanted !== "mode" &&
+            typeof CSS !== "undefined" &&
+            CSS.supports("color", wanted)
+        ) {
+            return { block: wanted, ink: backgroundOf(field) };
+        }
+
+        const group = (MODE_BADGES[V.mode] || MODE_BADGES.normal)[1];
+
+        return {
+            block: CURSOR_COLOURS[group] || CURSOR_COLOURS.normal,
+            ink: CURSOR_INK,
+        };
     }
 
     function backgroundOf(el) {
@@ -5013,6 +5176,11 @@
     let selectionTimer = 0;
 
     function onSelectionChange() {
+        if (V.mode === "replace" && !V.cmdline) {
+            redrawSoon();
+            return;
+        }
+
         if (inInsert() || V.cmdline) {
             return;
         }
@@ -5100,6 +5268,15 @@
         }, 0);
     }
 
+    function onWindowFocus(event) {
+        if (event.target !== window) {
+            return;
+        }
+
+        V.windowFocused = event.type === "focus";
+        drawCursor(false);
+    }
+
     function redrawSoon() {
         if (V.drawQueued) {
             return;
@@ -5138,6 +5315,8 @@
         document.addEventListener("input", redrawSoon, true);
         window.addEventListener("scroll", redrawSoon, true);
         window.addEventListener("resize", redrawSoon, true);
+        window.addEventListener("blur", onWindowFocus);
+        window.addEventListener("focus", onWindowFocus);
 
         V.mode = config.start_in_insert ? "insert" : "normal";
         updateStatus();
@@ -5195,6 +5374,7 @@
             sync,
             placeCursor,
             focusField,
+            drawCursor,
             config,
             blockInfo,
         },

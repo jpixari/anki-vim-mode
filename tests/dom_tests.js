@@ -51,6 +51,10 @@
         I.config.insert_escape = "";
         I.config.system_clipboard = false;
         I.config.jk_display_lines = false;
+        I.config.cursor_color = "mode";
+        I.config.cursor_blink = false;
+        I.config.cursor_min_width = 0;
+        V.windowFocused = true;
     }
 
     function setup(html, pos, index) {
@@ -1449,6 +1453,136 @@
         setup("<div><br></div><div>x</div>", 0);
         feed("j");
         expect("\nx", 1);
+    });
+
+    // ---- cursor ---------------------------------------------------------
+
+    function cursor() {
+        const el = document.getElementById("anki-vim-block-cursor");
+        const cs = getComputedStyle(el);
+
+        return {
+            el,
+            shown: cs.display !== "none",
+            shape: el.dataset.shape,
+            bg: cs.backgroundColor,
+            glyph: el.textContent,
+            // The stylesheet is not loaded in this page, so read the
+            // geometry the add-on set rather than the laid-out box.
+            rect: {
+                left: parseFloat(el.style.left),
+                width: parseFloat(el.style.width),
+            },
+        };
+    }
+
+    const GREEN = "rgb(152, 190, 101)";
+    const YELLOW = "rgb(236, 190, 123)";
+    const RED = "rgb(255, 108, 107)";
+
+    test("cursor: block in the mode colour", () => {
+        setup("abc def", 0);
+        eq(cursor().shown, true, "shown");
+        eq(cursor().shape, "block");
+        eq(cursor().bg, GREEN, "normal colour");
+        eq(cursor().glyph, "a");
+        feed("v");
+        eq(cursor().shape, "block", "visual shape");
+        eq(cursor().bg, YELLOW, "visual colour");
+        feed("<Esc>i");
+        eq(cursor().shown, false, "hidden in insert");
+        feed("<Esc>");
+        eq(cursor().shown, true, "back in normal");
+    });
+
+    test("cursor: half block while an operator is pending", () => {
+        setup("abc def ghi", 0);
+        feed("d");
+        eq(cursor().shape, "half");
+        feed("w");
+        eq(cursor().shape, "block", "after dw");
+        feed('"a2g');
+        eq(cursor().shape, "block", "prefix keys are not operators");
+        feed("U");
+        eq(cursor().shape, "half", "gU");
+        feed("<Esc>");
+        eq(cursor().shape, "block", "cancelled");
+        feed("dQ");
+        eq(cursor().shape, "block", "invalid command");
+        feed("df!");
+        eq(cursor().shape, "block", "operator whose motion fails");
+    });
+
+    test("cursor: underline for r and replace mode", () => {
+        setup("abc def", 0);
+        feed("r");
+        eq(cursor().shape, "underline");
+        feed("x");
+        eq(cursor().shape, "block");
+        expect("xbc def", 0);
+
+        feed("R");
+        eq(cursor().shown, true, "shown in replace mode");
+        eq(cursor().shape, "underline", "replace mode");
+        eq(cursor().bg, RED, "replace colour");
+
+        const before = cursor().rect.left;
+
+        feed("y");
+        I.drawCursor(false);
+        eq(cursor().rect.left > before, true, "follows the caret");
+        feed("<Esc>");
+        eq(cursor().shape, "block");
+        expect("ybc def", 0);
+    });
+
+    test("cursor: hollow when the window loses focus", () => {
+        setup("abc", 1);
+        window.dispatchEvent(new Event("blur"));
+        eq(cursor().shape, "hollow");
+        eq(cursor().glyph, "", "no glyph");
+        eq(cursor().bg, "rgba(0, 0, 0, 0)", "transparent");
+        window.dispatchEvent(new Event("focus"));
+        eq(cursor().shape, "block");
+        eq(cursor().glyph, "b");
+    });
+
+    test("cursor: colour, blink and minimum width options", () => {
+        setup("iii", 1);
+
+        const narrow = cursor().rect;
+
+        eq(cursor().el.classList.contains("anki-vim-cursor-blink"), false);
+
+        I.config.cursor_color = "text";
+        I.drawCursor(false);
+        eq(cursor().bg, getComputedStyle(field(0)).color, "text colour");
+
+        I.config.cursor_color = "#ff0000";
+        I.drawCursor(false);
+        eq(cursor().bg, "rgb(255, 0, 0)", "custom colour");
+
+        I.config.cursor_color = "not a colour";
+        I.drawCursor(false);
+        eq(cursor().bg, GREEN, "bad value falls back");
+
+        I.config.cursor_blink = true;
+        I.drawCursor(false);
+        eq(cursor().el.classList.contains("anki-vim-cursor-blink"), true);
+
+        I.config.cursor_min_width = 1;
+        I.drawCursor(false);
+
+        const wide = cursor().rect;
+        const fontSize = parseFloat(getComputedStyle(field(0)).fontSize);
+
+        eq(Math.round(wide.width), Math.round(fontSize), "widened");
+        eq(wide.left < narrow.left, true, "centred on the letter");
+        eq(
+            Math.abs(wide.left + wide.width / 2 - (narrow.left + narrow.width / 2)) < 1,
+            true,
+            "same centre",
+        );
     });
 
     test("status badge shows the mode letter", () => {

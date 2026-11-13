@@ -93,8 +93,8 @@ body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
   color: #ffffff;
 }
 
-/* Block cursor. Colours, font and geometry are set from the character it
-   covers, so it reads as that character in reverse video. */
+/* Block cursor. Font and geometry are set from the character it covers and
+   the character is redrawn on top, so the block does not hide it. */
 #anki-vim-block-cursor {
   position: fixed;
   z-index: 2147483646;
@@ -113,6 +113,20 @@ body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
 #anki-vim-block-cursor.anki-vim-cursor-atom {
   background: rgba(255, 255, 255, 0.95);
   mix-blend-mode: difference;
+}
+
+/* Optional blinking (cursor_blink): shown, then hidden, in steps. */
+#anki-vim-block-cursor.anki-vim-cursor-blink {
+  animation: anki-vim-cursor-blink 1.1s step-end infinite;
+}
+
+@keyframes anki-vim-cursor-blink {
+  0% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0;
+  }
 }
 
 /* Visual-block selection rectangles. */
