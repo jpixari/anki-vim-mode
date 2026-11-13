@@ -15,7 +15,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "3.0.0";
+    const VERSION = "3.1.0";
 
     if (window.ankiVim && window.ankiVim.version === VERSION) {
         window.ankiVim.applyConfig(window.ankiVimConfig || {});

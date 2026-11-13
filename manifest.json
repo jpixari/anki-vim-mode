@@ -2,7 +2,7 @@
   "name": "Anki Vim Mode",
   "package": "anki_vim_mode",
   "manifest_version": 3,
-  "mod": 2026111201,
+  "mod": 2026111301,
   "author": "ixari",
-  "version": "3.0.0"
+  "version": "3.1.0"
 }
