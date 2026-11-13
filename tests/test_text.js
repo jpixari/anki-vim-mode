@@ -28,6 +28,14 @@ eq(T.moveLines(L, 8, 1, 5), 14, "j keeps column");
 eq(T.moveLines(L, 0, 99, 0), 21, "j clamps");
 eq(T.moveLines(L, 21, -99, Infinity), 6, "k with $ column");
 
+// an empty first line (text starting with a line break)
+const E = "\nx\ny";
+eq(T.lineStart(E, 0), 0, "lineStart on empty first line");
+eq(T.lineLast(E, 0), 0, "lineLast on empty first line");
+eq(T.clampNormal(E, 0), 0, "clampNormal on empty first line");
+eq(T.lineStart("\n", 0), 0, "lineStart, only a line break");
+eq(T.moveLines(E, 0, 1, 0), 1, "j off an empty first line");
+
 // w
 eq(T.wordForward("foo bar", 0), 4, "w");
 eq(T.wordForward("foo.bar", 0), 3, "w punct");

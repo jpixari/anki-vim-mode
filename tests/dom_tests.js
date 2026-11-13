@@ -1428,6 +1428,29 @@
         eq(V.pos, 6);
     });
 
+    test("j / k from an empty first line", () => {
+        setup("<br>x<br>y", 0);
+        feed("j");
+        expect("\nx\ny", 1);
+        feed("j");
+        expect("\nx\ny", 3);
+        feed("kk");
+        expect("\nx\ny", 0);
+
+        // The reported case: type on the first line, backspace it all away.
+        setup("x<br>y", 0);
+        feed("Oabc<BS><BS><BS><Esc>");
+        expect("\nx\ny", 0);
+        feed("j");
+        expect("\nx\ny", 1);
+        feed("k");
+        expect("\nx\ny", 0);
+
+        setup("<div><br></div><div>x</div>", 0);
+        feed("j");
+        expect("\nx", 1);
+    });
+
     test("status badge shows the mode letter", () => {
         setup("abc", 0);
 

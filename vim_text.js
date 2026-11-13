@@ -40,6 +40,13 @@
     // ---- lines -----------------------------------------------------------
 
     function lineStart(text, pos) {
+        // lastIndexOf treats a negative start as 0, so without this check a
+        // line break at index 0 would be found and the first line would
+        // seem to start at 1.
+        if (pos <= 0) {
+            return 0;
+        }
+
         return text.lastIndexOf("\n", pos - 1) + 1;
     }
 
