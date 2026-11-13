@@ -162,6 +162,6 @@ python3 tests/e2e/run_anki_e2e.py /tmp/x # full check inside a throwaway Anki (o
 ./build.sh                               # builds anki_vim_mode.ankiaddon
 ```
 
-Pushing a tag such as `v3.0.0` makes GitHub build the `.ankiaddon` and attach it to a release.
+Publishing a GitHub release for a tag such as `v3.0.1` makes GitHub test and build the `.ankiaddon` and attach it to that release (the steps are at the top of `.github/workflows/release.yml`).
 
 `vim_text.js` is pure text logic. `editor_vim.js` maps it onto Anki's fields and performs every edit through the browser's editing commands. `vim_core.py` injects the scripts and handles `Esc`, `:w`/`:q` and the clipboard.

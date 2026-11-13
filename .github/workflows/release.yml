@@ -1,15 +1,18 @@
-# Builds the .ankiaddon package and publishes it as a GitHub release.
+# Tests the add-on, builds the .ankiaddon package and attaches it to a
+# release that you published. Publishing it yourself (rather than letting
+# this workflow create it) is what makes GitHub show you as its author.
 #
-# To release: update "version" in manifest.json, commit, then create an
-# annotated tag whose message is the release notes (markdown) and push it:
-#   git tag -a v3.0.0 -F notes.md --cleanup=verbatim && git push origin v3.0.0
+# To release: update "version" in manifest.json, commit and push, then
+#   git tag -a v3.0.1 -F notes.md --cleanup=verbatim
+#   git push origin v3.0.1
+#   gh release create v3.0.1 --title "Anki Vim Mode 3.0.1" --notes-from-tag
 # (--cleanup=verbatim keeps lines starting with "#", e.g. markdown headings.)
+# The package appears on the release a minute or so later.
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -17,29 +20,22 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # actions/checkout replaces an annotated tag with a plain ref to the
-      # commit, which loses the message. Fetch the real tag object again.
-      - name: Fetch the tag message
-        run: |
-          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != "tag" ]; then
-            echo "Tag $GITHUB_REF_NAME is not annotated; create it with git tag -a so it carries the release notes" >&2
-            exit 1
-          fi
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
-
       - name: Check the tag matches manifest.json
         run: |
           version="$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match manifest.json version $version" >&2
+          if [ "v$version" != "$TAG" ]; then
+            echo "Tag $TAG does not match manifest.json version $version" >&2
             exit 1
           fi
 
@@ -50,13 +46,9 @@ jobs:
           python3 -m py_compile __init__.py vim_core.py
 
       - name: Build package
-        run: ./build.sh "anki_vim_mode-$GITHUB_REF_NAME.ankiaddon"
+        run: ./build.sh "anki_vim_mode-$TAG.ankiaddon"
 
-      - name: Publish release
+      - name: Attach the package to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "anki_vim_mode-$GITHUB_REF_NAME.ankiaddon" \
-            --title "Anki Vim Mode ${GITHUB_REF_NAME#v}" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+        run: gh release upload "$TAG" "anki_vim_mode-$TAG.ankiaddon" --clobber
