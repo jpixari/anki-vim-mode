@@ -270,9 +270,20 @@ def main():
                 cases.append((lines, keys))
                 labels.append(group)
 
+    # Cases that once differed from Vim and were fixed (found by running
+    # generated key sequences through both).
+    extra = os.path.join(HERE, "vim_regressions.json")
+
+    if os.path.exists(extra) and (not only or only in "regressions"):
+        with open(extra, encoding="utf-8") as f:
+            for lines, keys in json.load(f):
+                cases.append((lines, keys))
+                labels.append("regressions")
+
     vim = run_vim(cases)
     addon = run_addon(cases)
     bad = 0
+    failed = []
 
     for label, (lines, keys), v, a in zip(labels, cases, vim, addon):
         if "error" in a:
@@ -280,7 +291,8 @@ def main():
             bad += 1
             continue
 
-        text = a["text"]
+        # The editor keeps some spaces as non-breaking spaces.
+        text = a["text"].replace(" ", " ")
         before = text[: a["pos"]]
         got = {
             "lines": text.split("\n"),
@@ -290,11 +302,16 @@ def main():
 
         if got != v:
             bad += 1
+            failed.append([lines, keys])
             print(f"DIFF [{label}] keys={keys!r} on {lines!r}")
             print(f"      vim  : {v['lines']!r} cursor {v['row']},{v['col']}")
             print(f"      addon: {got['lines']!r} cursor {got['row']},{got['col']}")
         elif verbose:
             print(f"ok   [{label}] {keys!r}")
+
+    if os.environ.get("VIM_COMPARE_FAILED"):
+        with open(os.environ["VIM_COMPARE_FAILED"], "w", encoding="utf-8") as f:
+            json.dump(failed, f)
 
     print(f"vim comparison: {len(cases) - bad} identical, {bad} different")
     sys.exit(1 if bad else 0)

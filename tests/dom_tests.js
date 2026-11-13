@@ -43,6 +43,7 @@
         V.playing = 0;
         V.groupDepth = 0;
         V.lastSub = null;
+        V.visualEol = false;
         V.lastInsertPos = null;
         V.history = { ":": [], "/": [] };
         I.config.vim_ctrl_keys = false;
@@ -1658,6 +1659,99 @@
             true,
             "same centre",
         );
+    });
+
+    test("gJ: joins with a space while J switches fields, raw otherwise", () => {
+        setup("ab<br>cd", 0);
+        feed("gJ");
+        expect("ab cd", 2);
+
+        setup("ab<br>cd", 0);
+        I.config.shift_jk_fields = false;
+        feed("gJ");
+        expect("abcd", 2);
+
+        setup("ab<br>cd", 0);
+        I.config.shift_jk_fields = false;
+        feed("J");
+        expect("ab cd", 2);
+    });
+
+    test("f<Space> and / find the spaces the editor stores as nbsp", () => {
+        setup("a&nbsp;&nbsp;b c", 0);
+        feed("f ");
+        eq(V.pos, 1, "f space");
+        feed(";");
+        eq(V.pos, 2, "repeat");
+        feed("0/ b<CR>");
+        eq(V.pos, 2, "search");
+    });
+
+    test("visual: l steps past the last character, $ before v does not", () => {
+        setup("ab<br>cd", 1);
+        feed("vld");
+        expect("acd", 1);
+
+        setup("ab<br>cd", 0);
+        feed("$vd");
+        expect("a\ncd", 0);
+    });
+
+    test("visual block follows the cursor onto short lines", () => {
+        setup("abcdef<br>xy<br>abcdef", 3);
+        feed("<C-q>jd");
+        expect("abef\nxy\nabcdef", 2);
+
+        setup("abcdef<br>xy<br>abcdef", 3);
+        feed("<C-q>jjd");
+        expect("abcef\nxy\nabcef", 3);
+    });
+
+    test("counts on text objects and V + object", () => {
+        setup("one two three", 0);
+        feed("d2aw");
+        expect("three", 0);
+
+        setup("f(a, (b), c)", 6);
+        feed("d2i(");
+        expect("f()", 2);
+
+        setup("one two<br>x", 4);
+        feed("Viwd");
+        expect("one \nx", 3);
+    });
+
+    test("empty lines: objects and motions leave the line alone", () => {
+        setup("a<br><br>b", 2);
+        feed("diw");
+        expect("a\n\nb", 2);
+        feed("cg_X<Esc>");
+        expect("a\nX\nb", 2);
+
+        setup("a<br>b<br><br>", 4);
+        feed("de");
+        expect("a\nb\n", 4);
+        feed("VU");
+        expect("a\nb\n", 4);
+    });
+
+    test(":d with a line number past the end is an error", () => {
+        setup("a<br>b", 0);
+        feed(":5d<CR>");
+        expect("a\nb", 0);
+        feed(":2d<CR>");
+        expect("a", 0);
+    });
+
+    test("j / k use the column left by an edit", () => {
+        setup("x 7 y<br>abcdef", 0);
+        I.config.vim_ctrl_keys = true;
+        feed("<C-a>j");
+        expect("x 8 y\nabcdef", 8);
+
+        setup("abcdef<br>abcdef", 0);
+        feed("5|j");
+        eq(V.pos, 11, "| sets the column");
     });
 
     test("status badge shows the mode letter", () => {

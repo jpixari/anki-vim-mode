@@ -440,6 +440,7 @@
         lastSub: null,
         insertReg: false,
         history: { ":": [], "/": [] },
+        visualEol: false,
         drawQueued: false,
         windowFocused: true,
         cursorKey: "",
@@ -666,19 +667,26 @@
             };
         }
 
+        let start = lo;
         let end = Math.min(hi + 1, m.text.length);
 
-        // v$ reaches past the last character and takes the line break too.
-        if (
-            V.desiredCol === Infinity &&
-            V.pos >= V.vAnchor &&
-            end === T.lineEnd(m.text, V.pos) &&
-            end > T.lineStart(m.text, V.pos)
-        ) {
-            end = Math.min(end + 1, m.text.length);
+        // v$ reaches past the last character and takes the line break too
+        // ($ pressed inside visual mode; not a $ from before the v).
+        if (V.visualEol) {
+            const le = T.lineEnd(m.text, V.pos);
+
+            if (le > T.lineStart(m.text, V.pos)) {
+                if (V.pos >= V.vAnchor && end === le) {
+                    end = Math.min(end + 1, m.text.length);
+                } else if (V.pos < V.vAnchor && V.pos === le - 1) {
+                    // The cursor end is the upper one: it sits after the
+                    // line's last character, which stays unselected.
+                    start = le;
+                }
+            }
         }
 
-        return { start: lo, end, lw: false };
+        return { start, end, lw: false };
     }
 
     // Put the DOM selection where the vim cursor / visual area is.
@@ -1065,7 +1073,8 @@
     // and step the *native* undo history until the field matches again, so
     // `u` undoes one whole vim change while Ctrl+Z keeps working as usual.
 
-    function beginChange() {
+    // posBefore: where undo puts the cursor back (default: where it is).
+    function beginChange(posBefore) {
         if (V.change || !V.field) {
             return;
         }
@@ -1073,7 +1082,7 @@
         V.change = {
             field: V.field,
             before: fieldHtml(V.field),
-            posBefore: V.pos,
+            posBefore: posBefore === undefined ? V.pos : posBefore,
         };
     }
 
@@ -1583,14 +1592,30 @@
             case "h":
             case "<Left>":
             case "<BS>":
+                if (!forOp && isVisual() && V.visualEol) {
+                    // Coming back from just past the line's end.
+                    return { pos: Math.max(ls, pos - (n - 1)) };
+                }
+
                 return pos === ls ? null : { pos: Math.max(ls, pos - n) };
 
             case "l":
             case "<Right>":
-            case " ":
-                return {
-                    pos: Math.min(forOp ? le : T.lineLast(text, pos), pos + n),
-                };
+            case " ": {
+                const p = Math.min(forOp ? le : T.lineLast(text, pos), pos + n);
+
+                if (!forOp && isVisual() && le > ls && pos + n > p) {
+                    // In visual mode the cursor may step just past the
+                    // last character, which selects the line break too.
+                    return V.visualEol && p === pos
+                        ? null
+                        : { pos: p, pastEnd: true };
+                }
+
+                // Already on the last character: the motion fails (and so
+                // keeps a column remembered from $).
+                return !forOp && p === pos ? null : { pos: p };
+            }
 
             case "j":
             case "<Down>":
@@ -1631,17 +1656,13 @@
                     p = T.wordForward(text, p, name === "W");
                 }
 
-                if (forOp && p < len) {
-                    // An operator never eats the line break after the last
-                    // word of a line ("dw" on the last word stops at EOL).
-                    const pls = T.lineStart(text, p);
+                if (forOp) {
+                    // With an operator the last word moved over stops at
+                    // the end of its line instead of going on to the next.
+                    p = T.wordForwardOp(text, pos, name === "W", n);
 
-                    if (
-                        pls > ls &&
-                        pls - 1 > pos &&
-                        text.slice(pls, p).trim() === ""
-                    ) {
-                        p = pls - 1;
+                    if (p === null) {
+                        return null;
                     }
                 }
 
@@ -1654,6 +1675,12 @@
 
                 for (let i = 0; i < n; i++) {
                     p = T.wordEnd(text, p, name === "E");
+                }
+
+                // Nothing further on (the last, empty line): no motion.
+                // (On a last character an operator still acts on it.)
+                if (pos >= len || p < pos || (!forOp && T.clampNormal(text, p) <= pos)) {
+                    return null;
                 }
 
                 return { pos: p, inc: true };
@@ -1697,12 +1724,21 @@
                 return { pos: T.firstNonBlank(text, pos) };
 
             case "_": {
+                if (n > 1 && le === len) {
+                    return null;
+                }
+
                 const p = T.moveLines(text, pos, n - 1, 0);
                 return { pos: T.firstNonBlank(text, p), lw: true };
             }
 
             case "$":
             case "<End>": {
+                // A count needs at least one line below to move onto.
+                if (n > 1 && le === len) {
+                    return null;
+                }
+
                 const p = n > 1 ? T.moveLines(text, pos, n - 1, 0) : pos;
 
                 return {
@@ -1712,13 +1748,20 @@
             }
 
             case "g_": {
-                let i = le;
+                // A count needs at least one line below to move onto.
+                if (n > 1 && le === len) {
+                    return null;
+                }
 
-                while (i > ls && T.isBlankChar(text[i - 1])) {
+                const p = n > 1 ? T.moveLines(text, pos, n - 1, 0) : pos;
+                const s0 = T.lineStart(text, p);
+                let i = T.lineEnd(text, p);
+
+                while (i > s0 && T.isBlankChar(text[i - 1])) {
                     i--;
                 }
 
-                return { pos: Math.max(ls, i - 1), inc: i > ls };
+                return { pos: Math.max(s0, i - 1), inc: true };
             }
 
             case "gg": {
@@ -1774,40 +1817,61 @@
                 return { pos: p, inc: type === "f" || type === "t" };
             }
 
-            case "}": {
-                let p = pos;
-
-                for (let i = 0; i < n; i++) {
-                    p = T.paragraphForward(text, p);
-                }
-
-                return { pos: p };
-            }
-
-            case "{": {
-                let p = pos;
-
-                for (let i = 0; i < n; i++) {
-                    p = T.paragraphBack(text, p);
-                }
-
-                return { pos: p };
-            }
+            case "}":
+            case "{":
+                return T.paragraphMove(text, pos, n, name === "}");
 
             case "%": {
+                if (hasCount) {
+                    // {count}% goes to that percentage of the text.
+                    const total = T.lineCount(text);
+
+                    if (n > 100) {
+                        return null;
+                    }
+
+                    const line = Math.max(1, Math.floor((n * total + 99) / 100));
+                    const s0 = T.lineStartOf(text, Math.min(line, total) - 1);
+
+                    return { pos: T.firstNonBlank(text, s0), lw: true };
+                }
+
                 const p = T.matchPair(text, pos);
                 return p < 0 ? null : { pos: p, inc: true };
             }
 
             case ")":
             case "(": {
+                const starts = T.sentenceStarts(text);
                 let p = pos;
 
                 for (let i = 0; i < n; i++) {
-                    p =
-                        name === ")"
-                            ? T.sentenceForward(text, p)
-                            : T.sentenceBack(text, p);
+                    let next;
+
+                    if (name === ")") {
+                        next = starts.find((s0) => s0 > p);
+                    } else {
+                        next = [...starts].reverse().find((s0) => s0 < p);
+
+                        if (next === starts[0]) {
+                            // Reached by running into the start of the text.
+                            if (i < n - 1) {
+                                return null;
+                            }
+                        }
+                    }
+
+                    if (next === undefined) {
+                        // Ran into the start / end of the text: that only
+                        // works as the last step.
+                        if (i < n - 1) {
+                            return null;
+                        }
+
+                        next = name === ")" ? text.length : 0;
+                    }
+
+                    p = next;
                 }
 
                 return { pos: p };
@@ -1882,7 +1946,8 @@
 
             case "|":
                 return {
-                    pos: Math.min(ls + n - 1, forOp ? le : T.lineLast(text, pos)),
+                    pos: Math.min(ls + n - 1, T.lineLast(text, pos)),
+                    col: n - 1,
                 };
 
             case "<CR>":
@@ -1919,7 +1984,27 @@
 
             case "*":
             case "#": {
-                const w = T.wordObject(text, pos, false);
+                // The keyword under the cursor, else the next one on the
+                // line, else whatever non-blank text is there.
+                let at = pos;
+
+                while (at < le && !/[\p{L}\p{N}_]/u.test(text[at])) {
+                    at++;
+                }
+
+                if (at >= le) {
+                    at = pos;
+
+                    while (at < le && T.isBlankChar(text[at])) {
+                        at++;
+                    }
+                }
+
+                if (at >= le) {
+                    return null;
+                }
+
+                const w = T.wordObject(text, at, false) || { start: at, end: at };
                 const word = text.slice(w.start, w.end);
 
                 if (!word.trim()) {
@@ -1944,7 +2029,8 @@
 
     function getMark(name) {
         if (name === "`" || name === "'") {
-            return V.marks["`"] || null;
+            // Before any jump Vim's previous position is the very start.
+            return V.marks["`"] || (V.field ? { field: V.field, pos: 0 } : null);
         }
 
         if (name === "<" || name === ">") {
@@ -2040,39 +2126,45 @@
         };
     }
 
-    function objectRange(text, pos, obj) {
+    function objectRange(text, pos, obj, count) {
         const a = obj.around;
         let r = null;
 
         switch (obj.type) {
             case "w":
-                r = T.wordObject(text, pos, a, false);
+                r = T.wordObject(text, pos, a, false, count);
                 break;
             case "W":
-                r = T.wordObject(text, pos, a, true);
+                r = T.wordObject(text, pos, a, true, count);
                 break;
             case '"':
             case "'":
             case "`":
                 r = T.quoteObject(text, pos, obj.type, a);
+
+                // 2i" takes the quotes too (but no white space around).
+                if (r && !a && count > 1) {
+                    r = { start: r.start - 1, end: r.end + 1 };
+                }
+
                 break;
             case "(":
             case ")":
             case "b":
-                r = T.pairObject(text, pos, "(", ")", a);
+                r = T.pairObject(text, pos, "(", ")", a, count);
                 break;
             case "[":
             case "]":
-                r = T.pairObject(text, pos, "[", "]", a);
+                r = T.pairObject(text, pos, "[", "]", a, count);
                 break;
             case "{":
             case "}":
             case "B":
-                r = T.pairObject(text, pos, "{", "}", a);
+                r = T.pairObject(text, pos, "{", "}", a, count);
                 break;
             case "<":
             case ">":
-                r = T.pairObject(text, pos, "<", ">", a);
+                r = T.pairObject(text, pos, "<", ">", a, count);
                 break;
             case "c":
                 r = T.clozeObject(text, pos, a);
@@ -2081,11 +2173,33 @@
                 r = T.sentenceObject(text, pos, a);
                 break;
             case "p":
-                r = T.paragraphObject(text, pos, a);
-                return r ? { start: r.start, end: r.end, lw: true } : null;
+                r = T.paragraphObject(text, pos, a, count);
+                return r
+                    ? { start: r.start, end: r.end, lw: true, anchor: r.start }
+                    : null;
         }
 
-        return r ? { start: r.start, end: r.end, lw: false } : null;
+        if (!r) {
+            return null;
+        }
+
+        // Vim's rule for an exclusive range that ends at the start of a
+        // line: stop at the end of the previous line, and if it began in
+        // the indent, take whole lines.
+        if (r.excl && r.end > r.start && text[r.end - 1] === "\n") {
+            if (text.slice(T.lineStart(text, r.start), r.start).trim() === "") {
+                return {
+                    start: T.lineStart(text, r.start),
+                    end: r.end - 1,
+                    lw: true,
+                    anchor: r.start,
+                };
+            }
+
+            return { start: r.start, end: r.end - 1, lw: false };
+        }
+
+        return { start: r.start, end: r.end, lw: false };
     }
 
     function operatorRange(m, cmd) {
@@ -2093,11 +2207,28 @@
         const pos = V.pos;
 
         if (cmd.self) {
-            return linesRange(text, pos, cmd.count || 1);
+            // A count needs at least one more line below (3dd near the end
+            // takes what is there, 2dd on the last line does nothing).
+            if ((cmd.count || 1) > 1 && T.lineEnd(text, pos) === text.length) {
+                return null;
+            }
+
+            const lines = linesRange(text, pos, cmd.count || 1);
+
+            if (cmd.op === "gu" || cmd.op === "gU" || cmd.op === "g~") {
+                // guu ends on the line's first non-blank if that is before
+                // the cursor; with a count the cursor does not move.
+                lines.anchor =
+                    (cmd.count || 1) === 1
+                        ? Math.min(pos, T.firstNonBlank(text, pos))
+                        : pos;
+            }
+
+            return lines;
         }
 
         if (cmd.obj) {
-            return objectRange(text, pos, cmd.obj);
+            return objectRange(text, pos, cmd.obj, cmd.count || 1);
         }
 
         let name = cmd.motion;
@@ -2115,7 +2246,7 @@
             // the end of the *next* word.
             const one = T.wordObject(text, pos, false, name === "E");
 
-            if ((cmd.count || 1) === 1 && one.end - 1 === pos) {
+            if ((cmd.count || 1) === 1 && one && one.end - 1 === pos) {
                 return { start: pos, end: pos + 1, lw: false };
             }
         }
@@ -2123,10 +2254,22 @@
         const r = computeMotion(name, cmd.arg, motionContext(m, cmd, true));
 
         if (!r) {
+            // cw / ch / cl with nowhere to go still start an insert.
+            if (cmd.op === "c" && /^[hlwWeE]$/.test(cmd.motion)) {
+                return { start: pos, end: pos, lw: false };
+            }
+
             return null;
         }
 
-        return motionToRange(text, pos, r, cmd.flip);
+        const range = motionToRange(text, pos, r, cmd.flip);
+
+        // Where Vim leaves the cursor after a yank or case change over
+        // whole lines: the upper end of the motion, column included.
+        // (y_ is like yy: the cursor does not move at all.)
+        range.anchor =
+            cmd.op === "y" && name === "_" ? pos : Math.min(pos, r.pos);
+        return range;
     }
 
     function motionToRange(text, pos, r, flip) {
@@ -2154,9 +2297,13 @@
             b = b - 1;
         }
 
+        // An inclusive motion that ends on an empty line has no character
+        // there to include; it must not take the line break.
+        const extra = inclusive && text[b] !== "\n" ? 1 : 0;
+
         return {
             start: a,
-            end: Math.min(inclusive ? b + 1 : b, text.length),
+            end: Math.min(b + extra, text.length),
             lw: false,
         };
     }
@@ -2222,6 +2369,29 @@
         }
     }
 
+    // Cursor position after an operator that leaves the text's shape alone
+    // (yank, case change): the start of the range, except that a linewise
+    // motion keeps the column it had there (yj stays put, yk goes up).
+    function afterLinewise(m, range) {
+        if (V.mode === "vline") {
+            // A cursor that moved above where V was pressed stays where it
+            // is; otherwise it goes to the start of the first line.
+            return T.lineIndex(m.text, V.pos) < T.lineIndex(m.text, V.vAnchor)
+                ? T.clampNormal(m.text, V.pos)
+                : range.start;
+        }
+
+        if (!range.lw || isVisual()) {
+            return range.start;
+        }
+
+        if (range.anchor === undefined) {
+            return V.pos;
+        }
+
+        return T.clampNormal(m.text, range.anchor);
+    }
+
     function applyOperator(op, range, reg) {
         const m = V.model;
 
@@ -2229,15 +2399,7 @@
             case "y": {
                 setRegister(reg, captureRange(m, range), "yank");
 
-                if (!range.lw || isVisual()) {
-                    V.pos = range.start;
-                } else if (T.lineStart(m.text, V.pos) !== range.start) {
-                    // yk / yip: up to the first yanked line, same column.
-                    V.pos = Math.min(
-                        range.start + (V.pos - T.lineStart(m.text, V.pos)),
-                        T.lineLast(m.text, range.start),
-                    );
-                }
+                V.pos = afterLinewise(m, range);
 
                 const lines = range.lw
                     ? T.lineIndex(m.text, range.end) -
@@ -2277,20 +2439,29 @@
                 enterInsert(range.start);
                 return;
 
-            case "gu":
+            case "gu": {
+                const to = afterLinewise(m, range);
+
                 transformRange(range, (s) => s.toLowerCase());
-                V.pos = range.start;
+                V.pos = to;
                 break;
+            }
 
-            case "gU":
+            case "gU": {
+                const to = afterLinewise(m, range);
+
                 transformRange(range, (s) => s.toUpperCase());
-                V.pos = range.start;
+                V.pos = to;
                 break;
+            }
 
-            case "g~":
+            case "g~": {
+                const to = afterLinewise(m, range);
+
                 transformRange(range, T.toggleCase);
-                V.pos = range.start;
+                V.pos = to;
                 break;
+            }
 
             case ">":
             case "<": {
@@ -2492,7 +2663,13 @@
         V.pos = r.text.includes("\n") ? at : Math.max(at, caret - 1);
     }
 
-    function joinLines(count) {
+    // raw: vim's gJ, which only removes the line break. (While J is used
+    // for field navigation, gJ stands in for J and joins with a space.)
+    function rawJoin(action) {
+        return action === "gJ" && !config.shift_jk_fields;
+    }
+
+    function joinLines(count, raw) {
         const times = Math.max(1, count - 1);
 
         for (let i = 0; i < times; i++) {
@@ -2503,23 +2680,34 @@
                 break;
             }
 
+            if (raw) {
+                replaceRange(le, le + 1, "");
+                V.pos = T.clampNormal(V.model.text, le);
+                continue;
+            }
+
             let next = le + 1;
 
             while (
                 next < text.length &&
-                (text[next] === " " || text[next] === "\t")
+                (text[next] === " " ||
+                    text[next] === "\t" ||
+                    text[next] === "\u00a0")
             ) {
                 next++;
             }
 
             const nextEmpty = next >= text.length || text[next] === "\n";
+            // No space before a ")" or after a line already ending in one.
             const needSpace =
                 !nextEmpty &&
+                text[next] !== ")" &&
                 le > T.lineStart(text, V.pos) &&
                 !T.isBlankChar(text[le - 1]);
 
             replaceRange(le, next, needSpace ? " " : "");
-            V.pos = needSpace ? le : Math.max(T.lineStart(text, V.pos), le - 1);
+            // The cursor ends where the two lines now meet.
+            V.pos = nextEmpty ? Math.max(T.lineStart(text, V.pos), le - 1) : le;
         }
     }
 
@@ -2537,8 +2725,8 @@
         }
 
         opts = opts || {};
-        beginChange();
         caret = T.clamp(caret, 0, m.text.length);
+        beginChange(opts.undoPos === undefined ? caret : opts.undoPos);
         setSel(m, caret, caret);
         V.mode = opts.replace ? "replace" : "insert";
         V.insert = {
@@ -2863,18 +3051,27 @@
 
         const m = V.model;
 
-        V.pos = isVisual()
-            ? T.clamp(r.pos, 0, Math.max(0, m.text.length - 1))
-            : T.clampNormal(m.text, r.pos);
+        V.pos = T.clampNormal(m.text, r.pos);
 
-        if (isVisual()) {
-            V.pos = T.clampNormal(m.text, V.pos);
+        if (r.pastEnd) {
+            V.desiredCol = T.lineEnd(m.text, V.pos) - T.lineStart(m.text, V.pos);
+            V.visualEol = true;
+            return;
         }
 
         if (r.col !== undefined) {
             V.desiredCol = r.col;
+            V.visualEol = isVisual() && r.col === Infinity;
         } else if (!r.keepCol) {
             V.desiredCol = V.pos - T.lineStart(m.text, V.pos);
+            V.visualEol = false;
+        } else if (isVisual()) {
+            // j / k onto a line shorter than the remembered column: in
+            // visual mode the cursor then sits past the last character.
+            const ls0 = T.lineStart(m.text, V.pos);
+            const len0 = T.lineEnd(m.text, V.pos) - ls0;
+
+            V.visualEol = len0 > 0 && V.desiredCol >= len0;
         }
     }
 
@@ -2901,15 +3098,38 @@
 
         if (cmd.op) {
             const range = operatorRange(m, cmd);
+            const text0 = m.text;
 
             if (!range) {
                 return;
             }
 
+            if (
+                cmd.op === "d" &&
+                !range.lw &&
+                text0.slice(range.start, range.end).includes("\n") &&
+                text0.slice(range.end, T.lineEnd(text0, range.end)).trim() === "" &&
+                text0.slice(T.lineStart(text0, range.start), range.start).trim() === ""
+            ) {
+                // Vim: a delete over several lines that starts in the
+                // indent and reaches the end of a line removes whole lines.
+                range.start = T.lineStart(text0, range.start);
+                range.end = T.lineEnd(text0, range.end);
+                range.lw = true;
+            }
+
             const mutating = cmd.op !== "y";
 
             if (mutating) {
-                beginChange();
+                // Like Vim, undo returns to the start of the changed text,
+                // which is not always where the cursor was (dip, di( ...).
+                beginChange(
+                    !range.lw
+                        ? range.start
+                        : range.anchor === undefined
+                          ? V.pos
+                          : T.clampNormal(m.text, range.anchor),
+                );
                 V.pendingDot = keys;
             }
 
@@ -3020,7 +3240,13 @@
             case "<C-v>":
                 V.vAnchor = pos;
                 V.blockAnchorCol = pos - T.lineStart(text, pos);
-                V.desiredCol = V.blockAnchorCol;
+
+                // A column remembered from $ stays: the block then reaches
+                // the end of every line.
+                if (V.desiredCol !== Infinity) {
+                    V.desiredCol = V.blockAnchorCol;
+                }
+
                 V.mode = "vblock";
                 return;
 
@@ -3117,7 +3343,16 @@
                 paste(cmd.action === "gP", count, cmd.reg);
 
                 if (V.pasteEnd !== null) {
+                    const now = V.model.text;
+                    const reg = getRegister(cmd.reg);
+
                     V.pos = V.pasteEnd;
+
+                    // Whole lines pasted at the very end: there is no line
+                    // after them, so stay on the last one.
+                    if (reg && reg.linewise && V.pos >= now.length) {
+                        V.pos = T.lineStart(now, now.length);
+                    }
                 }
 
                 return;
@@ -3138,6 +3373,7 @@
             case "V":
                 V.vAnchor = pos;
                 V.mode = cmd.action === "v" ? "visual" : "vline";
+                V.visualEol = false;
                 return;
 
             case "gv":
@@ -3200,7 +3436,7 @@
             case "gJ":
                 beginChange();
                 V.pendingDot = keys;
-                joinLines(count);
+                joinLines(count, rawJoin(cmd.action));
                 return;
 
             case ":":
@@ -3210,6 +3446,7 @@
             case "/":
             case "?":
                 openCmdline(cmd.action, "");
+                V.cmdline.count = count;
                 return;
 
             case "ZZ":
@@ -3241,14 +3478,27 @@
         }
 
         if (cmd.obj) {
-            const r = objectRange(text, V.pos, cmd.obj);
+            const r = objectRange(text, V.pos, cmd.obj, cmd.count || 1);
 
             if (!r || r.end <= r.start) {
+                // Viw on an empty line still becomes characterwise.
+                if (
+                    V.mode === "vline" &&
+                    /[wW]/.test(cmd.obj.type) &&
+                    T.lineStart(text, V.pos) === T.lineEnd(text, V.pos)
+                ) {
+                    V.mode = "visual";
+                }
+
                 return;
             }
 
             if (r.lw) {
                 V.mode = "vline";
+            } else if (V.mode === "vline") {
+                // As in Vim, a word / bracket / quote object turns a
+                // linewise selection into a characterwise one.
+                V.mode = "visual";
             }
 
             const single = V.vAnchor === V.pos;
@@ -3398,15 +3648,15 @@
             case "J":
             case "gJ": {
                 const lines =
-                    T.lineIndex(text, range.end) -
-                    T.lineIndex(text, range.start) +
-                    1;
+                    Math.abs(
+                        T.lineIndex(text, V.pos) - T.lineIndex(text, V.vAnchor),
+                    ) + 1;
 
                 remember();
                 beginChange();
                 setModeNormal();
                 V.pos = range.start;
-                joinLines(Math.max(2, lines));
+                joinLines(Math.max(2, lines), rawJoin(cmd.action));
                 return;
             }
 
@@ -3424,7 +3674,12 @@
                 const r = getRegister(cmd.reg);
 
                 if (!r || !r.text) {
+                    // Vim still removes the selection when there is
+                    // nothing to put in its place.
                     showMessage("E353: Nothing in register");
+                    executeVisual(
+                        Object.assign({}, cmd, { action: "d", reg: null }),
+                    );
                     return;
                 }
 
@@ -3452,6 +3707,7 @@
                         V.pos = T.firstNonBlank(remodel().text, range.start);
                     } else {
                         paste(true, cmd.count || 1, cmd.reg);
+                        V.pos = range.start;
                     }
                 } else {
                     deleteRange(range.start, range.end);
@@ -3485,12 +3741,17 @@
         const text = m.text;
         const la = T.lineIndex(text, V.vAnchor);
         const lc = T.lineIndex(text, V.pos);
-        const cursorCol =
-            V.desiredCol === Infinity
-                ? Infinity
-                : Math.max(V.desiredCol, V.pos - T.lineStart(text, V.pos));
+        // As in Vim the block's corner is where the cursor really is. On
+        // a line shorter than the remembered column that is just past the
+        // line's last character.
+        const cls = T.lineStart(text, V.pos);
+        const lineLen = T.lineEnd(text, V.pos) - cls;
+        const toEol = V.desiredCol === Infinity;
+        const cursorCol = toEol
+            ? lineLen
+            : Math.min(Math.max(V.desiredCol, V.pos - cls), lineLen);
         const c1 = Math.min(V.blockAnchorCol, cursorCol);
-        const c2 = Math.max(V.blockAnchorCol, cursorCol);
+        const c2 = toEol ? Infinity : Math.max(V.blockAnchorCol, cursorCol);
         const rows = [];
 
         for (let line = Math.min(la, lc); line <= Math.max(la, lc); line++) {
@@ -3664,7 +3925,7 @@
                 leave();
                 beginChange();
                 V.pos = top.s;
-                joinLines(Math.max(2, rows.length));
+                joinLines(Math.max(2, rows.length), rawJoin(cmd.action));
                 return;
 
             case ">":
@@ -3713,6 +3974,11 @@
         }
     }
 
+    // Actions that must not reset the column j / k remember.
+    const COLUMN_KEEPERS = new Set(
+        "<Esc> <C-[> J K : / ? q m zz zt zb ZZ ZQ".split(" "),
+    );
+
     function execute(cmd, keys) {
         const m = sync();
 
@@ -3723,6 +3989,8 @@
         const undoBefore = V.undo.length;
 
         V.pendingDot = null;
+
+        const wasNormal = !isVisual();
 
         if (isVisual()) {
             executeVisual(cmd);
@@ -3735,6 +4003,18 @@
                 V.pos = isVisual()
                     ? T.clamp(V.pos, 0, V.model.text.length)
                     : T.clampNormal(V.model.text, V.pos);
+            }
+
+            // An editing command (x, p, ~, Ctrl-a ...) leaves the column
+            // j / k aim for at wherever the cursor ended up.
+            if (
+                wasNormal &&
+                !isVisual() &&
+                cmd.action &&
+                !COLUMN_KEEPERS.has(cmd.action) &&
+                V.model
+            ) {
+                V.desiredCol = V.pos - T.lineStart(V.model.text, V.pos);
             }
 
             const changed = endChange() || V.undo.length > undoBefore;
@@ -3944,7 +4224,7 @@
             }
 
             V.cmdline = null;
-            runCmdline(c.type, c.text, c.op);
+            runCmdline(c.type, c.text, c.op, c.count);
 
             if (!V.cmdline) {
                 closeCmdline();
@@ -3996,6 +4276,7 @@
             };
         }
 
+        let bad = false;
         const address = (s) => {
             const match = /^(\d+|\.|\$)/.exec(s);
 
@@ -4006,6 +4287,10 @@
             const tok = match[1];
             const line =
                 tok === "." ? current : tok === "$" ? total - 1 : parseInt(tok, 10) - 1;
+
+            if (line > total - 1) {
+                bad = true;
+            }
 
             return { line: T.clamp(line, 0, total - 1), len: tok.length };
         };
@@ -4027,11 +4312,12 @@
                     l2: Math.max(a.line, b.line),
                     rest: rest.slice(1 + b.len),
                     given: true,
+                    bad,
                 };
             }
         }
 
-        return { l1: a.line, l2: a.line, rest, given: true };
+        return { l1: a.line, l2: a.line, rest, given: true, bad };
     }
 
     function substitute(m, l1, l2, spec, extraFlags) {
@@ -4136,7 +4422,7 @@
         );
     }
 
-    function runCmdline(type, input, pendingOp) {
+    function runCmdline(type, input, pendingOp, searchCount) {
         const m = sync();
 
         if (!m) {
@@ -4154,7 +4440,9 @@
 
             V.lastSearch = { pattern, forward };
 
-            const p = T.search(m.text, pattern, V.pos, forward, 1);
+            const times =
+                (pendingOp && pendingOp.cmd.count) || searchCount || 1;
+            const p = T.search(m.text, pattern, V.pos, forward, times);
 
             if (p < 0) {
                 showMessage("E486: Pattern not found: " + pattern);
@@ -4211,6 +4499,12 @@
                 V.pos = T.firstNonBlank(m.text, T.lineStartOf(m.text, range.l2));
             }
 
+            return;
+        }
+
+        if (range.bad) {
+            // :5d in a three-line field. (A bare :5 just goes to the end.)
+            showMessage("E16: Invalid range");
             return;
         }
 

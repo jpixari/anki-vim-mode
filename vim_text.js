@@ -239,17 +239,30 @@
             i += forward ? 1 : -1;
         }
 
+        // The editor stores some spaces as non-breaking spaces (at the
+        // start or end of a line, or doubled): f<Space> must find those too.
+        const hit = (j) =>
+            text[j] === ch || (ch === " " && text[j] === "\u00a0");
+
         for (let n = 0; n < count; n++) {
             if (forward) {
-                i = text.indexOf(ch, i + 1);
+                i++;
 
-                if (i === -1 || i >= e) {
+                while (i < e && !hit(i)) {
+                    i++;
+                }
+
+                if (i >= e) {
                     return -1;
                 }
             } else {
-                i = i - 1 < s ? -1 : text.lastIndexOf(ch, i - 1);
+                i--;
 
-                if (i === -1 || i < s) {
+                while (i >= s && !hit(i)) {
+                    i--;
+                }
+
+                if (i < s) {
                     return -1;
                 }
             }
@@ -475,53 +488,310 @@
     // ---- text objects ----------------------------------------------------
     // All return { start, end } with an exclusive end, or null.
 
-    function wordObject(text, pos, around, big) {
-        const s = lineStart(text, pos);
-        const e = lineEnd(text, pos);
-
-        if (s === e) {
-            return { start: pos, end: pos };
-        }
-
-        pos = clamp(pos, s, e - 1);
-
-        const c = cls(text, pos, big);
-        let a = pos;
-        let b = pos + 1;
-
-        while (a > s && cls(text, a - 1, big) === c) {
-            a--;
-        }
-
-        while (b < e && cls(text, b, big) === c) {
-            b++;
-        }
-
-        if (around) {
-            if (c !== 0) {
-                let b2 = b;
-
-                while (b2 < e && cls(text, b2, big) === 0) {
-                    b2++;
+    // A cursor that walks the text the way Vim's inc()/dec() walk a buffer.
+    // The "\n" ending a line (and the end of the text) stands for the
+    // position just past a line's last character, which Vim treats as
+    // blank. Used by the text objects ported from Vim's textobject.c.
+    function walker(text, start, big) {
+        const n = text.length;
+        const w = {
+            at: start,
+            nul: (i) => i >= n || text[i] === "\n",
+            cls: () => (w.nul(w.at) ? 0 : cls(text, w.at, big)),
+            col0: () => w.at === lineStart(text, w.at),
+            // 0: moved, 2: now past the last character, 1: now on the
+            // next line, -1: end of text.
+            inc: () => {
+                if (!w.nul(w.at)) {
+                    w.at++;
+                    return w.nul(w.at) ? 2 : 0;
                 }
 
-                if (b2 > b) {
-                    b = b2;
-                } else {
-                    while (a > s && cls(text, a - 1, big) === 0) {
-                        a--;
+                if (w.at < n) {
+                    w.at++;
+                    return 1;
+                }
+
+                return -1;
+            },
+            dec: () => {
+                if (!w.col0()) {
+                    w.at--;
+                    return 0;
+                }
+
+                if (w.at > 0) {
+                    w.at--;
+                    return 1;
+                }
+
+                return -1;
+            },
+            // Like inc/dec but never rest past the end of a line.
+            incl: () => {
+                let r = w.inc();
+
+                if (r >= 1 && !w.col0()) {
+                    r = w.inc();
+                }
+
+                return r;
+            },
+            decl: () => {
+                let r = w.dec();
+
+                if (r === 1 && !w.col0()) {
+                    r = w.dec();
+                }
+
+                return r;
+            },
+            oneleft: () => {
+                if (w.col0()) {
+                    return false;
+                }
+
+                w.at--;
+                return true;
+            },
+            lastLine: () => lineEnd(text, w.at) === n,
+            emptyLine: () => w.col0() && w.nul(w.at),
+        };
+
+        return w;
+    }
+
+    // w / W under an operator: Vim's fwd_word() with "eol" set, where the
+    // last word moved over stops at the end of its line. Returns the end
+    // position (possibly the line break itself), or null when it fails.
+    function wordForwardOp(text, pos, big, count) {
+        const w = walker(text, clamp(pos, 0, text.length), big);
+
+        for (let left = count; left > 0; left--) {
+            const lastCount = left === 1;
+            const sclass = w.cls();
+            const last = w.lastLine();
+            let i = w.inc();
+
+            if (i === -1 || (i >= 1 && last)) {
+                return left === count && i === -1 ? null : w.at;
+            }
+
+            if (i >= 1 && lastCount) {
+                return w.at;
+            }
+
+            if (sclass !== 0) {
+                let stop = false;
+
+                while (w.cls() === sclass) {
+                    i = w.inc();
+
+                    if (i === -1 || (i >= 1 && lastCount)) {
+                        stop = true;
+                        break;
                     }
                 }
-            } else if (b < e) {
-                const c2 = cls(text, b, big);
 
-                while (b < e && cls(text, b, big) === c2) {
-                    b++;
+                if (stop) {
+                    return w.at;
+                }
+            }
+
+            while (w.cls() === 0) {
+                if (w.emptyLine()) {
+                    break;
+                }
+
+                i = w.inc();
+
+                if (i === -1 || (i >= 1 && last)) {
+                    return w.at;
                 }
             }
         }
 
-        return { start: a, end: b };
+        return w.at;
+    }
+
+    // iw / aw / iW / aW with a count: Vim's current_word().
+    // Returns { start, end } (end exclusive), with excl: true when the
+    // object stopped at the start of a line, or null when it fails.
+    function wordObject(text, pos, around, big, count) {
+        const w = walker(text, clamp(pos, 0, text.length), big);
+
+        const backInLine = () => {
+            const sclass = w.cls();
+
+            while (!w.col0()) {
+                w.dec();
+
+                if (w.cls() !== sclass) {
+                    w.inc();
+                    break;
+                }
+            }
+        };
+
+        // true when the end of the text was hit
+        const skipChars = (cclass) => {
+            while (w.cls() === cclass) {
+                if (w.inc() === -1) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        const endWord = () => {
+            const sclass = w.cls();
+
+            if (w.inc() === -1) {
+                return false;
+            }
+
+            if (w.cls() === sclass && sclass !== 0) {
+                if (skipChars(sclass)) {
+                    return false;
+                }
+            } else if (sclass === 0) {
+                while (w.cls() === 0) {
+                    if (w.emptyLine()) {
+                        return true;
+                    }
+
+                    if (w.inc() === -1) {
+                        return false;
+                    }
+                }
+
+                if (skipChars(w.cls())) {
+                    return false;
+                }
+            }
+
+            w.dec();
+            return true;
+        };
+
+        const fwdWord = () => {
+            const sclass = w.cls();
+            const last = w.lastLine();
+            let i = w.inc();
+
+            if (i === -1 || (i >= 1 && last)) {
+                return false;
+            }
+
+            if (i >= 1) {
+                return true;
+            }
+
+            if (sclass !== 0) {
+                while (w.cls() === sclass) {
+                    i = w.inc();
+
+                    if (i === -1 || i >= 1) {
+                        return true;
+                    }
+                }
+            }
+
+            while (w.cls() === 0) {
+                if (w.emptyLine()) {
+                    break;
+                }
+
+                i = w.inc();
+
+                if (i === -1 || (i >= 1 && last)) {
+                    return true;
+                }
+            }
+
+            return true;
+        };
+
+        let inclusive = true;
+        let includeWhite = false;
+
+        backInLine();
+
+        let start = w.at;
+
+        if ((w.cls() === 0) === !!around) {
+            if (!endWord()) {
+                return null;
+            }
+        } else {
+            fwdWord();
+
+            if (w.col0()) {
+                w.decl();
+            } else {
+                w.oneleft();
+            }
+
+            if (around) {
+                includeWhite = true;
+            }
+        }
+
+        for (let left = (count || 1) - 1; left > 0; left--) {
+            inclusive = true;
+
+            if (w.incl() === -1) {
+                return null;
+            }
+
+            // Same choice as for the first object: white space and a word
+            // together for "aw", one of them at a time for "iw".
+            if ((w.cls() === 0) === !!around) {
+                if (!endWord()) {
+                    return null;
+                }
+            } else {
+                if (!fwdWord()) {
+                    return null;
+                }
+
+                if (!w.oneleft()) {
+                    inclusive = false;
+                }
+            }
+        }
+
+        if (includeWhite && (w.cls() !== 0 || (w.col0() && !inclusive))) {
+            // No white space after the word: take the white before it
+            // instead (but never a line's indent).
+            const end = w.at;
+
+            w.at = start;
+
+            if (w.oneleft()) {
+                backInLine();
+
+                if (w.cls() === 0 && !w.col0()) {
+                    start = w.at;
+                }
+            }
+
+            w.at = end;
+        }
+
+        // Ending past a line's last character (an empty line) includes
+        // nothing there: the line break is never part of the object.
+        const range = {
+            start,
+            end: inclusive && !w.nul(w.at) ? w.at + 1 : w.at,
+        };
+
+        if (!inclusive) {
+            range.excl = true;
+        }
+
+        return range;
     }
 
     function quoteObject(text, pos, quote, around) {
@@ -609,26 +879,141 @@
         return null;
     }
 
-    function pairObject(text, pos, open, close, around) {
-        let pair = enclosingPair(text, pos, open, close);
+    // i( a( i[ i{ i< ... with a count: Vim's current_block(). The count
+    // picks an outer block; when the cursor is not inside a block, the next
+    // one after it is used.
+    function pairObject(text, pos, open, close, around, count) {
+        const w = walker(text, clamp(pos, 0, text.length), false);
+        const white = (i) => text[i] === " " || text[i] === "\t" || text[i] === " ";
+        // On a blank that is part of the line's indent.
+        const inIndent = () => {
+            if (w.nul(w.at) || !white(w.at)) {
+                return false;
+            }
 
-        if (!pair) {
-            // Like vim, fall forward to the next pair on the line.
-            const e = lineEnd(text, pos);
-            const next = text.indexOf(open, pos);
+            for (let i = lineStart(text, w.at); i < w.at; i++) {
+                if (!white(i)) {
+                    return false;
+                }
+            }
 
-            if (next !== -1 && next < e) {
-                pair = enclosingPair(text, next, open, close);
+            return true;
+        };
+        const openBefore = (from) => {
+            let depth = 0;
+
+            for (let i = from - 1; i >= 0; i--) {
+                if (text[i] === close) {
+                    depth++;
+                } else if (text[i] === open) {
+                    if (depth === 0) {
+                        return i;
+                    }
+
+                    depth--;
+                }
+            }
+
+            return -1;
+        };
+        const closeAfter = (from) => {
+            let depth = 0;
+
+            for (let i = from + 1; i < text.length; i++) {
+                if (text[i] === open) {
+                    depth++;
+                } else if (text[i] === close) {
+                    if (depth === 0) {
+                        return i;
+                    }
+
+                    depth--;
+                }
+            }
+
+            return -1;
+        };
+
+        if (open === "{") {
+            while (inIndent()) {
+                if (w.inc() !== 0) {
+                    break;
+                }
             }
         }
 
-        if (!pair) {
+        if (text[w.at] === open) {
+            w.at++;
+        }
+
+        const inside = openBefore(w.at) !== -1;
+
+        if (!inside && (count || 1) > 1) {
             return null;
         }
 
-        return around
-            ? { start: pair.open, end: pair.close + 1 }
-            : { start: pair.open + 1, end: pair.close };
+        let found = -1;
+        let startPos = -1;
+
+        for (let left = count || 1; left > 0; left--) {
+            found = inside ? openBefore(w.at) : text.indexOf(open, w.at);
+
+            if (found === -1) {
+                break;
+            }
+
+            w.at = found;
+            startPos = found;
+
+            if (!inside) {
+                w.at = found + 1;
+            }
+        }
+
+        if (found === -1) {
+            return null;
+        }
+
+        const endPos = closeAfter(startPos);
+
+        if (endPos === -1) {
+            return null;
+        }
+
+        if (around) {
+            return { start: startPos, end: endPos + 1 };
+        }
+
+        w.at = startPos;
+        w.incl();
+
+        const start = w.at;
+
+        w.at = endPos;
+
+        let sol = w.col0();
+
+        w.decl();
+
+        while (inIndent()) {
+            sol = true;
+
+            if (w.decl() !== 0) {
+                break;
+            }
+        }
+
+        if (sol) {
+            // The closing bracket starts its line: stop before that line.
+            w.incl();
+            return { start, end: Math.max(start, w.at), excl: true };
+        }
+
+        if (start <= w.at) {
+            return { start, end: w.at + 1 };
+        }
+
+        return { start, end: start };
     }
 
     // Anki cloze deletion: {{c1::answer::hint}}.
@@ -676,29 +1061,123 @@
 
     // Paragraph object: returns line-based { start, end } (exclusive end,
     // both at line starts or text end) and is always linewise.
-    function paragraphObject(text, pos, around) {
-        const n = text.length;
-        const blank = (s) => lineEnd(text, s) === s;
-        const kind = blank(lineStart(text, pos));
-        let a = lineStart(text, pos);
+    // ip / ap with a count: Vim's current_par(). Lines holding only blanks
+    // count as white. Returns { start, end } covering whole lines, or null.
+    function paragraphObject(text, pos, around, count) {
+        const starts = [0];
 
-        while (a > 0 && blank(lineStart(text, a - 1)) === kind) {
-            a = lineStart(text, a - 1);
-        }
-
-        let b = lineEnd(text, pos);
-
-        while (b < n && blank(b + 1) === kind) {
-            b = lineEnd(text, b + 1);
-        }
-
-        if (around) {
-            while (b < n && blank(b + 1) !== kind) {
-                b = lineEnd(text, b + 1);
+        for (let i = 0; i < text.length; i++) {
+            if (text[i] === "\n") {
+                starts.push(i + 1);
             }
         }
 
-        return { start: a, end: b };
+        const total = starts.length;
+        const white = (l) => {
+            const s = starts[l];
+
+            return text.slice(s, lineEnd(text, s)).trim() === "";
+        };
+        let first = lineIndex(text, pos);
+        const whiteInFront = white(first);
+
+        while (first > 0 && white(first - 1) === whiteInFront) {
+            first--;
+        }
+
+        let last = first;
+
+        while (last < total && white(last)) {
+            last++;
+        }
+
+        last--;
+
+        let left = count || 1;
+
+        if (!around && whiteInFront) {
+            left--;
+        }
+
+        while (left-- > 0) {
+            if (last === total - 1) {
+                return null;
+            }
+
+            const doWhite = !around && white(last + 1);
+
+            if (around || !doWhite) {
+                last++;
+
+                while (last < total - 1 && !white(last + 1)) {
+                    last++;
+                }
+            }
+
+            if (left === 0 && whiteInFront && around) {
+                break;
+            }
+
+            if (around || doWhite) {
+                while (last < total - 1 && white(last + 1)) {
+                    last++;
+                }
+            }
+        }
+
+        // No white lines after the paragraph: take the ones before it.
+        if (!whiteInFront && !white(last) && around) {
+            while (first > 0 && white(first - 1)) {
+                first--;
+            }
+        }
+
+        return { start: starts[first], end: lineEnd(text, starts[last]) };
+    }
+
+    // { and } with a count: Vim's findpar(). Returns { pos, inc } or null
+    // when the count runs past the first / last line.
+    function paragraphMove(text, pos, count, forward) {
+        const n = text.length;
+        const blank = (s) => lineEnd(text, s) === s;
+        let s = lineStart(text, pos);
+
+        for (let left = count; left > 0; left--) {
+            let skipped = false;
+
+            for (let first = true; ; first = false) {
+                if (!blank(s)) {
+                    skipped = true;
+                }
+
+                if (!first && skipped && blank(s)) {
+                    break;
+                }
+
+                const e = lineEnd(text, s);
+                const next = forward ? (e >= n ? -1 : e + 1) : s === 0 ? -1 : lineStart(text, s - 1);
+
+                if (next === -1) {
+                    if (left > 1) {
+                        return null;
+                    }
+
+                    break;
+                }
+
+                s = next;
+            }
+        }
+
+        // Running into the last line going forward ends on its last
+        // character (and includes it); otherwise on the line's start.
+        const e = lineEnd(text, s);
+
+        if (forward && e === n && e > s) {
+            return { pos: e - 1, inc: true };
+        }
+
+        return { pos: s, inc: false };
     }
 
     // ---- search ----------------------------------------------------------
@@ -719,6 +1198,8 @@
         }
 
         pattern = pattern.replace(/\\[<>]/g, "\\b");
+        // A space also matches the non-breaking spaces the editor stores.
+        pattern = pattern.replace(/ /g, "[ \\u00a0]");
 
         const f = (flags || "g") + "mu" + (ignoreCase ? "i" : "");
 
@@ -803,6 +1284,7 @@
         firstNonBlank,
         moveLines,
         wordForward,
+        wordForwardOp,
         wordEnd,
         wordBack,
         wordEndBack,
@@ -810,6 +1292,8 @@
         matchPair,
         paragraphForward,
         paragraphBack,
+        paragraphMove,
+        sentenceStarts,
         sentenceForward,
         sentenceBack,
         sentenceObject,

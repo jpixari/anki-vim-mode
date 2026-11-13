@@ -67,7 +67,7 @@ A count works in front of most commands: `3dd`, `2dw`, `5j`, `d3w`.
 | `q` + letter ... `q` | record a macro; `@` + letter plays it, `@@` repeats |
 | `r` + char | replace a character |
 | `~` `gu` `gU` `g~` | change case |
-| `gJ` | join lines |
+| `gJ` | join lines (like vim's `J`; with `shift_jk_fields` off, `J` does that and `gJ` joins without a space) |
 | `.` | repeat the last change |
 | `u` `Ctrl-r` | undo / redo |
 | `"a` ... `"z` | named registers; `"+` is the system clipboard, `"_` discards, `"0` last yank, `"1`-`"9` deleted lines |
@@ -137,6 +137,16 @@ The cursor's shapes follow Doom Emacs: a box in normal mode, a hollow box in vis
 ## Not implemented (yet)
 
 The HTML source editor (vim mode covers the normal rich-text fields), folds, windows/tabs, `:g`, and vim's own regex dialect (`/` and `:s` use JavaScript regular expressions).
+
+### Known differences from Vim
+
+The add-on is checked against real Vim with thousands of generated key sequences (`tests/compare_with_vim.py`). What still differs:
+
+- Sentence motions and objects (`(` `)` `is` `as`) around blank lines and with counts.
+- An operator combined with a motion that cannot move, e.g. `g~h` in the first column, where Vim's result is a quirk.
+- `.` after a visual-mode command, and the cursor column after redoing a whole-line delete.
+- `` ` ` `` / `''` only remember jumps made with the jump motions.
+- A yanked visual block is not padded with spaces on short lines.
 
 ## Support
 

@@ -1,0 +1,6407 @@
+[
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"G3$"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwviBp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gwguk"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwvaBp"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"$va}d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$gui]"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$yaBP"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwv0p"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gg~2_"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"va>d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Gvtop"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jdi{"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GwViwy"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GviBp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gv^p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi<d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j$VBy"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVi}cX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwgUj"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"$v%cX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Va}cX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llya(P"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jjfaVa)cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jVapd"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwya{P"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"Gvwp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwg~a)"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wva{y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jg~i("
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVa)cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"vi>p"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvggp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"v{p"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GviWp"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"G2/e<CR>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$vfecX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"G2{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jygEP"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"di(u"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllg~i)"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwd2aw"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwv$p"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"Gva>p"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"ll2("
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"wgUi("
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"va`p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"vi<y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwgu2i]"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwguj"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"c2iwX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$yi(P"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwgUa{"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GVlU"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwgU2ip"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwv{p"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"ll2%"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gv_cX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$gUa("
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j3/e<CR>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vaby"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jllgua}"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jllcgEX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"lldi)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"d2a)"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gw2e"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$vi\"cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jjfaVapcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$vi]d"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$daw"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"G2$"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"ViWd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"j$2("
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi[y"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"ll3g_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$g~i["
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwd2?o<CR>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wVi{d"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gg~2{"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"V)p"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$vfod"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Gw3)"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwViWd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"$gUj"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwy-"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GViwcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GgU2a{"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jj2%"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GVapp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$vi(cX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"d2$"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"ll2{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwg~gg"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$v,d"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"j$2%"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"vtop"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwyi("
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvawcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$viWcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Vi(p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwy2%"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwva`p"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$vawcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"ViWU"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jllg~j"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$ciBX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jjfa3g_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GgU2ip"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"G$Viwy"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GwV)d"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$viWcX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gvg_U"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$Vky"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwg~2i("
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"vi{y"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"llci>X<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gc2g_X<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$va[cX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jll#"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jVby"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GVeU"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GvgEp"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwv0p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$gUG"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwd2as"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gv%p"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"G$vapcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwguap"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"g~2}"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llya[P"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwViWU"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"$2}"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwg~2ip"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$ViWd"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwy2%"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVa(y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jllg~G"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"Gwyap"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gd2ap"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"ya)P"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GVwJ"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwc2abX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jjfaguap"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jjVi)cX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gw2%"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllyab"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$ya{P"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j$daW"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jva)cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"j$3{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$Vabd"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jjfaViwcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwd2a<"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$g~aB"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"$yip"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwy2G"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$3("
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$vi(cX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gd2/e<CR>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVa(d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"vi)rX"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jjfa2g_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$g~2G"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jllgUa{"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$vabd"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"llcibX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wVa}d"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jVawcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$gua<"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GwVaWy"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jca)X<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwg~k"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jjfag~ap"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llgua]"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gvep"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gd2iW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"$va<d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$ya("
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvTep"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jllcgeX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwd2{"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"c2iWX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GgU2}"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"llguG"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vibrX"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwViBd"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"g~2a)"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jj2}"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwg~2_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwguk"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$v,cX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwviwp"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"j$va}d"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$va`d"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwgu2k"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwci(X<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GwyG"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwgU2}"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j3g_"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwvfop"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwg~2j"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"g~a{"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"vTep"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Viwd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"j$Vgey"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwva}p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"g~2a]"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wva{cX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwy2-"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"ll2("
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwgu2_"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$v%d"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$ya("
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwviBp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwgU2ab"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$2{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jj3)"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GVa}d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"viBp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"dibp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwVabrX"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jg~ab"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Vi\"y"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"v0p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jda{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"w2g_"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwvtep"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwy2aW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"w3g_"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwd2ip"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwdib"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$Va)d"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi]y"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GVapp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$ViWd"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llvaBcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"vi]p"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$da)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"llVa'd"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"chX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"$vi'cX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jvi(y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$Va]y"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Gwdap"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwy2aw"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Va)U"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"ll2("
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Vi]J"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gvtop"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GVawU"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"gU2g_"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"va<p"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gva`p"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gvlp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llgUa}"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"GwVawd"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"vWJ"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$vibd"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$3g_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jVa[y"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GVawU"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwVi(p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwya)P"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gw2}"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j$VgEy"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"G$3{"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"g~2%"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Vawd"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Gg~2ib"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gwguk"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$vi)d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwd2aw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$VibcX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"VawrX"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwg~2%"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"vi[p"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"$vi[d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llya]"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Gc2*X<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"j$3%"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"vep"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllgUgg"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GVaWcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwd^u"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwg~2ap"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"wVa<cX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"va]p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Gg~2i("
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$Va}cX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"G$Vawd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jll2/e<CR>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllyi)P"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"ll3)"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"wcawX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"GwVawy"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"gU2)"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"$va)cX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwya}"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"llgu_"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gvfop"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wvibcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"g~a)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"ya>P"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gvey"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"d2%"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvbJ"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"ll3}"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gvasp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwvi{J"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"wyip"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"j$ViWy"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$yi(P"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gy2ap"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Gc2apX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$Va(cX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"j$Viwd"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"G3g_"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"llVaWcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$Vi}cX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$vi(cX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jjViWcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"G2}"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"d2ip"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"lldab"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"j$capX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"wya<"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$gui{"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$gui)"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"gui)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jllVi<cX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vaWp"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"c2apX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$gUj"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"llVibcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jVi[d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wgUi]"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gva(p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$3("
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jViWd"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwgU2ip"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwc2ipX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$Va(y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GVaBp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jjVi(y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wvaBy"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jjfaVapd"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GvWp"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwdBu"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"j$vGcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwygg"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$vfecX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwVa(rX"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwda{u"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$ca)X<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvaWcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"llya<"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jj3#"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GVi{y"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$vaBcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwVibU"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"llVaWd"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gy2ip"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GwViwy"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"g~2iw"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$3?o<CR>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gd2)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jVby"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$VaWcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwg~2ap"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"lldiB"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwvi)cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jg~ap"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"wgU*"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jj3g_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"Vi{y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwVaWrX"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"$vi]d"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gv}cX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GwgUk"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvibp"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$gU+"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wViwd"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwvi(p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jyi(P"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"wda("
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gv)y"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwVa<p"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wguiB"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"llVi(y"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gv^J"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi[p"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GwchX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"gU2%"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwvBp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"G$vkcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jw3%"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwg~+"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jjfaVapy"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$ci<X<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"j$ViwcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GgU2ap"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"lly#P"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwgu2("
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jll2%"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jjfa2%"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"v-p"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jg~a)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwgU2k"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jdab"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvisp"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jw3("
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jwvggJ"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVa)y"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jViwcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwViBcX<Esc>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"d2g_"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gd2aW"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$viBd"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GgU2_"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jg~a{"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$VawcX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Gg~2aW"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"G2)"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jll2%"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j$Vgey"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Gw2}"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jvi}d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwVaWcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwc2i[X<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwc2iwX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"ll3}"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jllVi(y"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Vi)y"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gvg_d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jjgUap"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllgU-"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"va)U"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jjVa)cX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwviWp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Gc2awX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GV_U"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"viBp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jygeP"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GgU2_"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"w3/e<CR>"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"wyap"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"GvTep"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwd2iW"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"3?o<CR>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwVapp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jllgUaW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GwV_d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"GViWU"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$yabP"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi'y"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwVawp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$di)"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jjfa2_"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gv}y"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"j$va>cX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"GviWp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vibJ"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"GwVa}d"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jjfa3g_"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"vep"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"c2ipX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwVa{J"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gg~2aW"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jVi)y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"wVa[d"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"G$Vi}y"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"gua["
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Vasp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"gUa)"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"jwgU2}"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$yap"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jc*X<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"vgEp"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jwvibp"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwvi<p"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"wchX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j$gUab"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"llyib"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"$viBcX<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"2}"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"Gva[p"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"v}p"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"v^p"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"c2awX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j3)"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"j$g~ab"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"c2awX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jgUi("
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"$vi}d"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"jj2("
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"j$vaWcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"c2i'X<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jjVawcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$va`cX<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"wyip"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"$vi`d"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwyip"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"Vi(cX<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GvwcX<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"da}"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GwVly"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"$vaWcX<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jll*"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jwVibrX"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vGp"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"d2)"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"jwvi>p"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jjfa2}"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"jyab"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jwg~2-"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"va\"p"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"dawC Q<Esc>yF /e<CR>g~F wy2W"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2dw:2t0<CR>j~<C-q>jly2ddC Q<Esc>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"Yg~ipchK<Esc>ywP\"Aywg~{dk"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"<C-r>d2wddPgEgeyiwdiw"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"?o<CR>2dw"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"*dGgpgui\""
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"};gUUa<BS><BS>q<Esc>g&"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"ylpguu:s/e/E/<CR>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"dawgJ"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"ywP3{3tefegJyg_"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"g&2n<C-r>gJf(i ab<Esc>yw"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"3eyfo<C-q>jdgi Z<Esc>2%ywP"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"gJ3Fe:s/o/0/g<CR>"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"&_3tegu2lgPx<C-q>jd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"3kI ef<Esc>gUUguu<C-q>jd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"<C-q>jlc W<Esc>R op<Esc>"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"3F gJY"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"mbcw N<Esc>wdkguu"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"3Te2toyiwgJ"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"3x2FeV dmagJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"maywgJ+dek2B"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"a<BS><BS>q<Esc>t)2*yiBddgpgJ"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"dwA gh<Esc><C-q>jd"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"qwA!<Esc>jqg~#2;3fogJyyP"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"xvlUdb2p<C-q>jlrZ2?o<CR>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"A gh<Esc>u"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"(/e<CR>gUg_A gh<Esc><C-x>f(2dw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vey\"0p''3."
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"o ij<Esc>gE\"Ayw{3J"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"G_22GdE2dd"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"~rZguu"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"\"Ayw+{I ef<Esc>&a<BS><BS>q<Esc>u"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"diwA gh<Esc>,\"ayy_``"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2g_3Ji<BS><Esc>d$yiwcw N<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"O kl<Esc>F "
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"gu2iW/e<CR>3^2#gJ@w"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"<C-q>jlrZg~$vd3/e<CR>E:%norm A.<CR>i<BS><Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"to2dw-vip d"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"vjdgEgJ<C-a>?o<CR>I ef<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"2pya]gPgunylpgJ"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"2G$<C-q>jlrZ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"*yg_Xf((xgJ"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"'b3<C-a>2%A gh<Esc><C-q>jly`a"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"3<C-a>'b3e''<C-x>k"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"dap3GO kl<Esc>F "
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"gJ\"-pdawo ij<Esc>2Fe"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"daw:%s/a/A/g<CR>\"-p``"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"+y2G\"_ddchK<Esc>E"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"3%2?o<CR>gUi)<C-q>jlrZg&<C-q>jlc W<Esc>w"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"<C-q>jlc W<Esc>3texp"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"d0<C-q>jlIZ<Esc>~''s Q<Esc>"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"GgEfogUUvwdvjd"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"2k\"0pPgU2{Ee``"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"gUfogJciw N<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"%fe''R op<Esc>"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"geg~gedi[vwdto``3fe"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"c2hK<Esc>2?o<CR>@@B"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2dw_;gUU"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"yyjpdaw:s/o/0/g<CR>~''gU2i["
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"Te3,<C-q>jlrZ2*@@"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"gUUR op<Esc>,2f(VjdgJ"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"d2awcaw N<Esc><C-q>jlrZd2ge"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+":2<CR>gJgg3n32G*^"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"``R op<Esc><C-q>jlypfo2(32G"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"vj<Esc>gvy2dwxyy"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"\"ayyqqxqgJR op<Esc><C-q>jd3fod2-"
+],
+[
+[
+"say \"hello world\" now",
+"x = [1, 2, 3]",
+"{a: (b)}"
+],
+"daw)ye3W2ddvey"
+],
+[
+[
+"if (a[0] == 'x') { b(); }",
+"<p>some <b>bold</b></p>",
+"end `tick` done"
+],
+"cc Q<Esc>gJyaW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2dwa cd<Esc>"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"<C-q>jlrZca]K<Esc>)2Tevdc0K<Esc>3-"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"v~PgUap:2t0<CR>ngJ"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"gi Z<Esc>y2a{y2te``f(gU2Gg&"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"TeA<CR><Esc>a cd<Esc>gUUywP"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2B2dw2ediwdTe"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"~3JA gh<Esc>3t)yi<gUUw"
+],
+[
+[
+"word",
+"x",
+"yy zz",
+"The End."
+],
+"db<C-q>jlrZyyjpf(dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wiX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"waX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wAX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wIX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"woX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwOX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wcwX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwdku"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwdju"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wxu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwdipu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwJu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwpu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"yyjwpu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wrXu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"w~u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwguuu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wsX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wCX<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wDu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwvjdu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwVdu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wiX<Esc>u<C-r>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wcwX<Esc>u<C-r>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"woX<Esc>u<C-r>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjIab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"l<C-q>jjIab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjlAab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jj$Aab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjlcab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"l<C-q>jjlcabc<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjlsab<Esc>"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjIab<Esc>u"
+],
+[
+[
+"alpha",
+"beta",
+"gamma",
+"delta",
+"epsilon"
+],
+"<C-q>jjlcab<Esc>u"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"gJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wgJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"3gJ"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"gJ"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jgJ"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jjgJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"VjgJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"vjjgJ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"gJ."
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"gJu"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"2dw"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"3dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wwdw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"ww2dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"w3dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"5dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"9dw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"dw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"2dw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"3dw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"jdw"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"j2dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gwwdw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"Gww3dw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wwcwX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"ww2cwX<Esc>"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"wwywP"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"ww2ywP"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jdw"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"jjdw"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"Gdw"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"4GdW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"4G2dW"
+],
+[
+[
+"a",
+"",
+"",
+"bb cc",
+"  ",
+"ddd",
+""
+],
+"5Gdw"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$<C-q>jd"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$<C-q>jjrZ"
+],
+[
+[
+"Hello there. How are you? Fine!",
+"",
+"New para here."
+],
+"j$<C-q>jlrZ"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$vjd"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$vkd"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"j$vkd"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$l"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"$jlk"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwguu"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwgUU"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jwg~~"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"wwg~~"
+],
+[
+[
+"one two three",
+"four five six",
+"seven eight nine"
+],
+"jw2guu"
+],
+[
+[
+"  indented line",
+"",
+"foo(bar, baz) qux",
+"a.b.c d-e-f"
+],
+"ww3gUU"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"$<C-q>jd"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"$hl<C-q>jd"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"A<Esc><C-q>jd"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"ll<C-q>jd"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"ll<C-q>jrZ"
+],
+[
+[
+" gh",
+"x",
+"yy zz"
+],
+"l<C-q>jrZ"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jrZ"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjrZ"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjrZ"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjjrZ"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjjd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjjld"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jIZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjIZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jAZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjAZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjjAZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjcZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjcZ<Esc>"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"l<C-q>jlld"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"l<C-q>jjlld"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"l<C-q>jjjlld"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"jl<C-q>kd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"jl<C-q>jjd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"jjjj$<C-q>kkd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjjhhd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjj$d"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjOd"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jj~"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjU"
+],
+[
+[
+"abcdef",
+"xy",
+"abcdef",
+"",
+"abcdefgh"
+],
+"lll<C-q>jjjJ"
+],
+[
+[
+"a",
+"b"
+],
+"Jx"
+],
+[
+[
+"ab",
+"  cd",
+"ef"
+],
+"J"
+],
+[
+[
+"ab",
+"  cd",
+"ef"
+],
+"3J"
+],
+[
+[
+"ab",
+"  cd",
+"ef"
+],
+"jJ"
+],
+[
+[
+"ab ",
+"cd"
+],
+"J"
+],
+[
+[
+"ab",
+"",
+"cd"
+],
+"J"
+],
+[
+[
+"ab",
+"",
+"cd"
+],
+"3J"
+],
+[
+[
+"ab",
+")cd"
+],
+"J"
+],
+[
+[
+""
+],
+"cw N<Esc>"
+],
+[
+[
+""
+],
+"cwN<Esc>"
+],
+[
+[
+"a"
+],
+"chK<Esc>"
+],
+[
+[
+"ab"
+],
+"$clK<Esc>"
+],
+[
+[
+"ab",
+"cd"
+],
+"G2dd"
+],
+[
+[
+"ab",
+"cd"
+],
+"G2yyP"
+],
+[
+[
+"ab",
+"cd"
+],
+"G2ccX<Esc>"
+],
+[
+[
+"ab",
+"cd",
+"ef"
+],
+"j5dd"
+],
+[
+[
+"one two",
+"three"
+],
+"``"
+],
+[
+[
+"one two",
+"three"
+],
+"w''"
+],
+[
+[
+"  one two",
+"three"
+],
+"jw''"
+],
+[
+[
+"one two",
+"three"
+],
+"jwG``"
+],
+[
+[
+"one two",
+"three"
+],
+"jwgg``"
+],
+[
+[
+"one",
+"two"
+],
+"yyGgp"
+],
+[
+[
+"one",
+"two"
+],
+"yygp"
+],
+[
+[
+"one",
+"two"
+],
+"yyGgP"
+],
+[
+[
+"one",
+"two"
+],
+"ywGgp"
+],
+[
+[
+"one",
+"two"
+],
+"yw$gp"
+]
+]
