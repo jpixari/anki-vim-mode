@@ -116,8 +116,8 @@ Tools > Add-ons > Anki Vim Mode > Config.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `cursor_blink` | `false` | blink the normal-mode cursor |
-| `cursor_color` | `"mode"` | cursor colour: `"mode"` (follows the mode badge), `"text"` (text colour, like reverse video) or a CSS colour |
+| `cursor_blink` | `false` | blink the cursor |
+| `cursor_color` | `"#51afef"` | cursor colour, the same in every mode: a CSS colour, or `"text"` for the text colour |
 | `cursor_min_width` | `0` | minimum cursor width in em (e.g. `0.55`) so it is not a sliver on `i` or `l`; `0` = as wide as the letter |
 | `enable_in_browser` | `true` | use vim mode in the Browser's editor |
 | `insert_escape` | `""` | two letters such as `"jk"` that leave insert mode when typed quickly |
@@ -132,7 +132,7 @@ Tools > Add-ons > Anki Vim Mode > Config.
 
 ### Cursor
 
-In normal mode the cursor is a block in the mode's colour. It becomes a half block while an operator (`d`, `c`, `y`, ...) waits for its motion, an underline after `r` and in replace mode, and an outline while the editor window is not focused.
+The cursor's shapes and its single colour are the ones Doom Emacs uses: a box in normal mode, a thin bar in insert mode, a hollow box in visual mode, a half-height block while an operator (`d`, `c`, `y`, ...) waits for its motion, and an underline after `r` and in replace mode. It is hidden while the editor window is not focused.
 
 ## Not implemented (yet)
 

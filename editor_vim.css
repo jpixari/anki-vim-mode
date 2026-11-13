@@ -93,8 +93,8 @@ body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
   color: #ffffff;
 }
 
-/* Block cursor. Font and geometry are set from the character it covers and
-   the character is redrawn on top, so the block does not hide it. */
+/* Cursor. Shape, colour and geometry are set from the mode and the character
+   it sits on; as a box it redraws that character on top of itself. */
 #anki-vim-block-cursor {
   position: fixed;
   z-index: 2147483646;

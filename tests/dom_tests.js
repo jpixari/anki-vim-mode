@@ -51,7 +51,7 @@
         I.config.insert_escape = "";
         I.config.system_clipboard = false;
         I.config.jk_display_lines = false;
-        I.config.cursor_color = "mode";
+        I.config.cursor_color = "#51afef";
         I.config.cursor_blink = false;
         I.config.cursor_min_width = 0;
         V.windowFocused = true;
@@ -1472,33 +1472,56 @@
             rect: {
                 left: parseFloat(el.style.left),
                 width: parseFloat(el.style.width),
+                height: parseFloat(el.style.height),
             },
         };
     }
 
-    const GREEN = "rgb(152, 190, 101)";
-    const YELLOW = "rgb(236, 190, 123)";
-    const RED = "rgb(255, 108, 107)";
+    const BLUE = "rgb(81, 175, 239)";
 
-    test("cursor: block in the mode colour", () => {
+    // The shapes and the single colour are Doom Emacs's.
+    test("cursor: box in normal, bar in insert, hollow in visual", () => {
         setup("abc def", 0);
         eq(cursor().shown, true, "shown");
         eq(cursor().shape, "block");
-        eq(cursor().bg, GREEN, "normal colour");
+        eq(cursor().bg, BLUE, "normal colour");
         eq(cursor().glyph, "a");
+
         feed("v");
-        eq(cursor().shape, "block", "visual shape");
-        eq(cursor().bg, YELLOW, "visual colour");
-        feed("<Esc>i");
-        eq(cursor().shown, false, "hidden in insert");
+        eq(cursor().shape, "hollow", "visual shape");
+        eq(cursor().bg, "rgba(0, 0, 0, 0)", "hollow is transparent");
+        eq(cursor().el.style.borderColor, BLUE, "same colour in visual");
+        eq(cursor().glyph, "", "hollow has no glyph");
+        feed("<Esc>V");
+        eq(cursor().shape, "hollow", "visual line");
         feed("<Esc>");
-        eq(cursor().shown, true, "back in normal");
+        eq(cursor().shape, "block");
+
+        feed("i");
+        eq(cursor().shown, true, "shown in insert");
+        eq(cursor().shape, "bar");
+        eq(cursor().bg, BLUE, "same colour in insert");
+        eq(cursor().rect.width, 2, "bar width");
+
+        const before = cursor().rect.left;
+
+        feed("xy");
+        I.drawCursor(false);
+        eq(cursor().rect.left > before, true, "bar follows the caret");
+        feed("<Esc>");
+        eq(cursor().shape, "block", "back in normal");
+        expect("xyabc def", 1);
     });
 
     test("cursor: half block while an operator is pending", () => {
         setup("abc def ghi", 0);
+
+        const full = cursor().rect.height;
+
         feed("d");
         eq(cursor().shape, "half");
+        eq(cursor().rect.height, Math.round(full / 2), "half height");
+        eq(cursor().glyph, "", "no glyph");
         feed("w");
         eq(cursor().shape, "block", "after dw");
         feed('"a2g');
@@ -1517,6 +1540,7 @@
         setup("abc def", 0);
         feed("r");
         eq(cursor().shape, "underline");
+        eq(cursor().rect.height, 2, "2px bar");
         feed("x");
         eq(cursor().shape, "block");
         expect("xbc def", 0);
@@ -1524,7 +1548,7 @@
         feed("R");
         eq(cursor().shown, true, "shown in replace mode");
         eq(cursor().shape, "underline", "replace mode");
-        eq(cursor().bg, RED, "replace colour");
+        eq(cursor().bg, BLUE, "same colour in replace");
 
         const before = cursor().rect.left;
 
@@ -1536,15 +1560,22 @@
         expect("ybc def", 0);
     });
 
-    test("cursor: hollow when the window loses focus", () => {
+    test("cursor: hidden while the window is not focused", () => {
         setup("abc", 1);
         window.dispatchEvent(new Event("blur"));
-        eq(cursor().shape, "hollow");
-        eq(cursor().glyph, "", "no glyph");
-        eq(cursor().bg, "rgba(0, 0, 0, 0)", "transparent");
+        eq(cursor().shown, false, "hidden");
         window.dispatchEvent(new Event("focus"));
+        I.drawCursor(false);
+        eq(cursor().shown, true, "shown again");
         eq(cursor().shape, "block");
         eq(cursor().glyph, "b");
+        eq(V.pos, 1, "position kept");
+
+        feed("i");
+        window.dispatchEvent(new Event("blur"));
+        eq(cursor().shown, false, "hidden in insert too");
+        window.dispatchEvent(new Event("focus"));
+        feed("<Esc>");
     });
 
     test("cursor: colour, blink and minimum width options", () => {
@@ -1564,7 +1595,7 @@
 
         I.config.cursor_color = "not a colour";
         I.drawCursor(false);
-        eq(cursor().bg, GREEN, "bad value falls back");
+        eq(cursor().bg, BLUE, "bad value falls back");
 
         I.config.cursor_blink = true;
         I.drawCursor(false);

@@ -62,7 +62,7 @@
         show_status: true,
         status_position: "bottom-left",
         vim_ctrl_keys: false,
-        cursor_color: "mode",
+        cursor_color: "#51afef",
         cursor_blink: false,
         cursor_min_width: 0,
     };
@@ -4746,8 +4746,9 @@
         const field = V.field;
         let m = V.model;
 
+        // Like Doom Emacs, no cursor at all while the window is unfocused.
         if (
-            V.mode === "insert" ||
+            !V.windowFocused ||
             V.cmdline ||
             !field ||
             activeField() !== field
@@ -4758,7 +4759,7 @@
 
         let pos;
 
-        if (V.mode === "replace") {
+        if (inInsert()) {
             // Typing goes straight to the field here, so follow the caret.
             m = remodel();
 
@@ -4786,14 +4787,10 @@
             return;
         }
 
-        if (allowScroll && ensureVisible(field, rect)) {
+        if (allowScroll && !inInsert() && ensureVisible(field, rect)) {
             rect = cursorRect(m, pos);
         }
 
-        // The block is opaque and re-draws the character it covers in
-        // other colours. That also hides the browser's own thin caret,
-        // which must not be hidden with CSS: `caret-color` set on the field
-        // gets copied into the note's HTML when the browser merges lines.
         const ch = pos < m.text.length ? m.text[pos] : "\n";
         const c = m.chars[pos];
         const source =
@@ -4801,11 +4798,17 @@
         const style = getComputedStyle(source);
         const fontSize = parseFloat(style.fontSize) || 16;
         const shape = cursorShape();
-        const hollow = shape === "hollow";
-        const atom = ch === ATOM && !hollow;
+        const block = shape === "block";
+        // Images and MathJax have no glyph to redraw: invert them instead.
+        const atom = block && ch === ATOM;
         let glyph = "";
 
-        if (!hollow && ch !== ATOM && ch !== "\n" && !T.isBlankChar(ch)) {
+        // The box is opaque and re-draws the character it covers in the
+        // field's background colour. That also hides the browser's own thin
+        // caret, which must not be hidden with CSS: `caret-color` set on the
+        // field gets copied into the note's HTML when the browser merges
+        // lines.
+        if (block && ch !== ATOM && ch !== "\n" && !T.isBlankChar(ch)) {
             const code = ch.charCodeAt(0);
             const next = m.text[pos + 1];
 
@@ -4813,53 +4816,55 @@
                 code >= 0xd800 && code <= 0xdbff && next ? ch + next : ch;
         }
 
-        // Proportional fonts make the block as narrow as the letter under
+        // Proportional fonts make the cursor as narrow as the letter under
         // it; cursor_min_width (in em) widens it around the letter's centre.
         const minWidth = fontSize * (Number(config.cursor_min_width) || 0);
-        let width = rect.width > 1 ? rect.width : fontSize * 0.55;
         let left = rect.left;
+        let top = rect.top;
+        let width = rect.width > 1 ? rect.width : fontSize * 0.55;
+        let height = rect.height;
         let widened = false;
 
-        if (rect.width > 1 && width < minWidth) {
+        if (shape === "bar") {
+            width = 2;
+        } else if (rect.width > 1 && width < minWidth) {
             left -= (minWidth - width) / 2;
             width = minWidth;
             widened = true;
         }
 
-        const colours = cursorColours(style, field);
+        if (shape === "half") {
+            height = Math.round(rect.height / 2);
+        } else if (shape === "underline") {
+            height = 2;
+        }
+
+        top += rect.height - height;
+
+        const colour = cursorColour(style);
+        const hollow = shape === "hollow";
 
         el.textContent = glyph;
         el.dataset.shape = shape;
         el.classList.toggle("anki-vim-cursor-atom", atom);
-        el.classList.toggle(
-            "anki-vim-cursor-blink",
-            !!config.cursor_blink && !hollow,
-        );
+        el.classList.toggle("anki-vim-cursor-blink", !!config.cursor_blink);
         el.style.display = "block";
         el.style.left = left + "px";
-        el.style.top = rect.top + "px";
+        el.style.top = top + "px";
         el.style.width = width + "px";
-        el.style.height = rect.height + "px";
-        el.style.lineHeight = rect.height + "px";
+        el.style.height = height + "px";
+        el.style.lineHeight = height + "px";
         el.style.textAlign = widened ? "center" : "left";
         el.style.fontFamily = style.fontFamily;
         el.style.fontSize = style.fontSize;
         el.style.fontWeight = style.fontWeight;
         el.style.fontStyle = style.fontStyle;
-        el.style.border = hollow ? "1px solid " + colours.block : "";
-        el.style.background = hollow ? "transparent" : atom ? "" : colours.block;
-        el.style.color = atom ? "" : colours.ink;
-        // Half block and underline are the full block cut down to its lower
-        // part, so the character above the cut stays readable.
-        el.style.clipPath =
-            shape === "half"
-                ? "inset(50% 0 0 0)"
-                : shape === "underline"
-                  ? "inset(82% 0 0 0)"
-                  : "";
+        el.style.border = hollow ? "1px solid " + colour : "";
+        el.style.background = hollow ? "transparent" : atom ? "" : colour;
+        el.style.color = atom ? "" : backgroundOf(field);
 
         // A cursor that just moved is shown solid before it blinks again.
-        const key = [left, rect.top, shape].join("|");
+        const key = [left, top, shape].join("|");
 
         if (config.cursor_blink && key !== V.cursorKey) {
             el.style.animation = "none";
@@ -4870,11 +4875,15 @@
         V.cursorKey = key;
     }
 
-    // block: normal. half: an operator is waiting for its motion.
-    // underline: r / replace mode. hollow: the window is not focused.
+    // The shapes Doom Emacs (evil) uses for each state:
+    //   block      normal mode (`box`)
+    //   bar        insert mode (`bar`, 2px)
+    //   hollow     visual modes (`hollow`)
+    //   half       an operator is waiting for its motion (`evil-half-cursor`)
+    //   underline  replace mode and a pending r (`hbar`, 2px)
     function cursorShape() {
-        if (!V.windowFocused) {
-            return "hollow";
+        if (V.mode === "insert") {
+            return "bar";
         }
 
         if (V.mode === "replace") {
@@ -4883,43 +4892,33 @@
 
         const kind = pendingKind();
 
-        return kind === "replace"
-            ? "underline"
-            : kind === "operator"
-              ? "half"
-              : "block";
+        if (kind === "replace") {
+            return "underline";
+        }
+
+        if (kind === "operator") {
+            return "half";
+        }
+
+        return isVisual() ? "hollow" : "block";
     }
 
-    const CURSOR_COLOURS = {
-        normal: "#98be65",
-        visual: "#ecbe7b",
-        replace: "#ff6c6b",
-    };
-    const CURSOR_INK = "#282c34";
+    // One colour in every mode, as in Doom: doom-one's cursor blue.
+    const CURSOR_COLOUR = "#51afef";
 
-    // cursor_color: "mode" (the badge's colour for the current mode),
-    // "text" (the text colour, as reverse video) or any CSS colour.
-    function cursorColours(style, field) {
-        const wanted = String(config.cursor_color || "mode").trim();
+    // cursor_color: a CSS colour, or "text" for the text colour.
+    function cursorColour(style) {
+        const wanted = String(config.cursor_color || "").trim();
 
         if (wanted === "text") {
-            return { block: style.color, ink: backgroundOf(field) };
+            return style.color;
         }
 
-        if (
-            wanted !== "mode" &&
-            typeof CSS !== "undefined" &&
-            CSS.supports("color", wanted)
-        ) {
-            return { block: wanted, ink: backgroundOf(field) };
+        if (wanted && typeof CSS !== "undefined" && CSS.supports("color", wanted)) {
+            return wanted;
         }
 
-        const group = (MODE_BADGES[V.mode] || MODE_BADGES.normal)[1];
-
-        return {
-            block: CURSOR_COLOURS[group] || CURSOR_COLOURS.normal,
-            ink: CURSOR_INK,
-        };
+        return CURSOR_COLOUR;
     }
 
     function backgroundOf(el) {
@@ -5176,12 +5175,13 @@
     let selectionTimer = 0;
 
     function onSelectionChange() {
-        if (V.mode === "replace" && !V.cmdline) {
+        if (inInsert() && !V.cmdline) {
+            // Keep the bar / underline on the caret (arrow keys, mouse).
             redrawSoon();
             return;
         }
 
-        if (inInsert() || V.cmdline) {
+        if (V.cmdline) {
             return;
         }
 
@@ -5274,7 +5274,13 @@
         }
 
         V.windowFocused = event.type === "focus";
-        drawCursor(false);
+
+        if (V.windowFocused) {
+            // Anki may have re-rendered the field while we were away.
+            redrawSoon();
+        } else {
+            drawCursor(false);
+        }
     }
 
     function redrawSoon() {

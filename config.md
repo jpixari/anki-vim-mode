@@ -1,7 +1,7 @@
 Changes apply to editor windows opened after you press OK.
 
-- **cursor_blink** (`true`/`false`): make the normal-mode cursor blink.
-- **cursor_color** (`"mode"`, `"text"` or a CSS colour such as `"#51afef"`): colour of the normal-mode cursor. `"mode"` follows the mode badge (green normal, yellow visual, red replace); `"text"` uses the text colour, like reverse video in a terminal.
+- **cursor_blink** (`true`/`false`): make the cursor blink.
+- **cursor_color** (a CSS colour such as `"#51afef"`, or `"text"`): colour of the cursor, the same in every mode. `"text"` uses the text colour, like reverse video in a terminal.
 - **cursor_min_width** (number, in em; `0` = off): fields use a proportional font, so the cursor is as narrow as the letter under it (thin on `i` or `l`). A value such as `0.55` gives it at least that width, at the cost of overlapping the neighbouring letters a little.
 - **enable_in_browser** (`true`/`false`): use vim mode in the Browser's editor. Add Cards and Edit Current always use it.
 - **insert_escape** (two letters, e.g. `"jk"` or `"jj"`): typing these quickly in insert mode returns to normal mode. Empty (`""`) turns it off.
@@ -14,6 +14,6 @@ Changes apply to editor windows opened after you press OK.
 - **system_clipboard** (`true`/`false`): yank, delete and paste use the system clipboard (like `set clipboard=unnamedplus`). The `"+` register always uses it.
 - **vim_ctrl_keys** (`true`/`false`): give more Ctrl keys their vim meaning instead of Anki's. Normal mode: `Ctrl-v` visual block (instead of paste), `Ctrl-a`/`Ctrl-x` add/subtract from a number (instead of select all/cut), `Ctrl-d`/`Ctrl-u`/`Ctrl-f`/`Ctrl-b` move by half/full pages, `Ctrl-o`/`Ctrl-i` jump back/forward. Insert mode: `Ctrl-w` delete word, `Ctrl-u` delete to line start (instead of underline), `Ctrl-h` backspace, `Ctrl-r` + register to paste it. `Ctrl-r` (redo) and `Ctrl-q` (visual block) always work.
 
-The cursor's shape shows what vim mode is waiting for: a block normally, a half block after an operator such as `d` or `c`, an underline after `r` and in replace mode, and an outline while the editor window is not focused.
+The cursor follows Doom Emacs: a box in normal mode, a thin bar in insert mode, a hollow box in visual mode, a half-height block after an operator such as `d` or `c`, and an underline after `r` and in replace mode. It is hidden while the editor window is not focused.
 
 Type `:help` in normal mode for the list of keys.
