@@ -56,6 +56,10 @@
         I.config.cursor_blink = false;
         I.config.cursor_min_width = 0;
         V.windowFocused = true;
+        I.config.hlsearch = true;
+        I.config.highlight_yank = true;
+        V.hlsearch = false;
+        window.ankiVim.applyConfig({ mappings: {} });
     }
 
     function setup(html, pos, index) {
@@ -1752,6 +1756,229 @@
         setup("abcdef<br>abcdef", 0);
         feed("5|j");
         eq(V.pos, 11, "| sets the column");
+    });
+
+    // ---- Anki keys, surround, mappings, highlights --------------------
+
+    test("cloze: dsc removes it, ]c [c jump between them", () => {
+        setup("a {{c1::one}} b {{c2::two::hint}} c", 0);
+        feed("]c");
+        eq(V.pos, 2, "]c");
+        feed("]c");
+        eq(V.pos, 16, "second");
+        feed("]c");
+        eq(V.pos, 16, "no third");
+        feed("[c");
+        eq(V.pos, 2, "[c");
+        feed("2]c");
+        eq(V.pos, 16, "count");
+        feed("fwdsc");
+        expect("a {{c1::one}} b two c", 16);
+        feed("u");
+        expect("a {{c1::one}} b {{c2::two::hint}} c");
+        feed("0fodsc");
+        expect("a one b {{c2::two::hint}} c", 2);
+    });
+
+    test("cloze: dsc keeps formatting inside", () => {
+        setup("x {{c1::<b>bold</b> it}} y", 9);
+        feed("dsc");
+        eq(html(), "x <b>bold</b> it y");
+    });
+
+    test("format operators: bold, italic, underline, MathJax", () => {
+        setup("one two three", 4);
+        feed("\\biw");
+        eq(/<b>two<\/b>/.test(html()), true, "bold word: " + html());
+        expect("one two three", 4);
+        feed("u");
+        eq(html(), "one two three", "undo");
+
+        setup("one two three", 4);
+        feed("\\ie");
+        eq(/<i>two<\/i>/.test(html()), true, "italic: " + html());
+
+        setup("one two three", 0);
+        feed("ve\\u");
+        eq(/<u>one<\/u>/.test(html()), true, "visual underline: " + html());
+        eq(V.mode, "normal");
+
+        setup("a x^2 b", 2);
+        feed("\\miW");
+        expect("a \\(x^2\\) b", 2);
+
+        setup("one two", 0);
+        feed("\\bb");
+        eq(html(), "one two", "\\bb at the start is bold back a word: nothing");
+    });
+
+    test("highlight operator uses highlight_color", () => {
+        setup("one two", 0);
+        feed("\\hiw");
+        eq(/background-color:\s*rgb\(255, 255, 0\)/.test(html()), true, html());
+        eq(text(), "one two");
+    });
+
+    test("surround: ys, yss, ds, cs, visual S", () => {
+        setup("one two three", 4);
+        feed("ysiw)");
+        expect("one (two) three", 4);
+        feed("cs)]");
+        expect("one [two] three", 4);
+        feed("ds]");
+        expect("one two three", 4);
+        feed('ysiw"');
+        expect('one "two" three', 4);
+        feed("cs\"'");
+        expect("one 'two' three", 4);
+        feed("ds'");
+        expect("one two three", 4);
+        feed("ysiw(");
+        expect("one ( two ) three", 4);
+        feed("ds(");
+        expect("one two three", 4);
+        feed("yss}");
+        expect("{one two three}", 0);
+        feed("ds}wvee");
+        feed("S*");
+        expect("one *two three*", 4);
+        eq(V.mode, "normal");
+        feed("u");
+        expect("one two three");
+    });
+
+    test("surround: dot repeat and cloze as a surround", () => {
+        setup("a b c", 0);
+        feed("ysiw)fb.");
+        expect("(a) (b) c", 4);
+        feed("0ds)");
+        expect("a (b) c", 0);
+
+        setup("cap of France", 0);
+        feed("ysiwc");
+        expect("{{c1::cap}} of France", 0);
+    });
+
+    test("whole-field object", () => {
+        setup("<br>one<br>two<br><br>", 2);
+        feed("yae");
+        eq(V.regs['"'].text, "\none\ntwo\n\n", "yae");
+        feed("yie");
+        eq(V.regs['"'].text, "one\ntwo\n", "yie");
+        feed("dae");
+        expect("", 0);
+    });
+
+    test("gf goes to a field by number", () => {
+        setup("first", 2);
+        field(1).innerHTML = "second";
+        field(2).innerHTML = "third";
+        feed("3gf");
+        eq(fields().indexOf(V.field), 2, "third field");
+        feed("gf");
+        eq(fields().indexOf(V.field), 0, "gf = first");
+        feed("9gf");
+        eq(fields().indexOf(V.field), 0, "no ninth field");
+    });
+
+    test("gt focuses the tag editor", () => {
+        setup("abc", 0);
+
+        const spacer = document.createElement("div");
+        let clicked = 0;
+
+        spacer.className = "tag-spacer";
+        spacer.addEventListener("click", () => clicked++);
+        document.body.appendChild(spacer);
+        feed("gt");
+        spacer.remove();
+        eq(clicked, 1, "clicked the tag area");
+    });
+
+    test("search in visual mode extends the selection", () => {
+        setup("one two three", 0);
+        feed("v/th<CR>");
+        eq(V.mode, "visual");
+        eq(V.pos, 8);
+        feed("d");
+        expect("hree", 0);
+
+        setup("one two three", 0);
+        feed("v/zzz<Esc>");
+        eq(V.mode, "visual", "Esc in the search keeps the selection");
+        feed("<Esc>");
+    });
+
+    test("hlsearch: matches are marked, :noh hides them", () => {
+        const marks = () =>
+            document.querySelectorAll("#anki-vim-search > div").length;
+
+        setup("one two one", 0);
+        eq(marks(), 0, "nothing before a search");
+        feed("/one<CR>");
+        eq(marks(), 2, "both matches");
+        feed(":noh<CR>");
+        eq(marks(), 0, ":noh");
+        feed("n");
+        eq(marks(), 2, "n shows them again");
+        feed("i");
+        eq(marks(), 0, "hidden while typing");
+        feed("<Esc>");
+        I.config.hlsearch = false;
+        feed("n");
+        eq(marks(), 0, "option off");
+    });
+
+    test("yank flash", () => {
+        const flashes = () =>
+            document.querySelectorAll("#anki-vim-flash > div").length;
+
+        setup("one two", 0);
+        feed("yiw");
+        eq(flashes(), 1, "flash on yank");
+        I.config.highlight_yank = false;
+        feed("wyiw");
+        document.getElementById("anki-vim-flash").textContent = "";
+        feed("yiw");
+        eq(flashes(), 0, "option off");
+    });
+
+    test("mappings", () => {
+        const maps = () =>
+            window.ankiVim.applyConfig({
+                mappings: { H: "^", L: "$", ",c": "gciw", ",,": "x", Q: "A!<Esc>" },
+            });
+
+        setup("&nbsp;&nbsp;one two three", 8);
+        maps();
+        feed("H");
+        eq(V.pos, 2, "H -> ^");
+        feed("L");
+        eq(V.pos, 14, "L -> $");
+        feed("dH");
+        expect("  e", 2);
+
+        setup("one two", 0);
+        maps();
+        feed(",c");
+        expect("{{c1::one}} two", 0);
+
+        setup("abc", 0);
+        maps();
+        feed(",,");
+        expect("bc", 0);
+        // Not a mapping: both keys act as themselves (, then x).
+        feed(",x");
+        expect("c", 0);
+        feed("fH");
+        eq(V.pos, 0, "not mapped as an argument of f");
+        feed("Q");
+        expect("c!", 1);
+        feed("rH");
+        expect("cH", 1);
+        window.ankiVim.applyConfig({ mappings: {} });
+        feed("H");
+        eq(V.pos, 0, "mappings cleared: H is vim's H again");
     });
 
     test("status badge shows the mode letter", () => {

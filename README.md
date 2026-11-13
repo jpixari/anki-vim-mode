@@ -83,12 +83,42 @@ Use after `d` `c` `y` or in visual mode, with `i` (inner) or `a` (around).
 | `(` `[` `{` `<` (also `b`, `B`) | brackets |
 | `p` `s` | paragraph, sentence |
 | `c` | cloze deletion: `cic` changes the answer inside `{{c1::answer::hint}}`, `dac` removes the whole cloze |
+| `e` | the whole field: `yae` copies it, `dae` empties it (`ie` leaves out blank lines at the ends) |
+
+### Made for Anki
+
+| Key | Action |
+| --- | --- |
+| `gc` `gC` + motion | wrap in a cloze deletion with a new / the same number |
+| `dsc` | remove the cloze around the cursor but keep its text |
+| `]c` `[c` | jump to the next / previous cloze |
+| `\b` `\i` `\u` + motion | bold / italic / underline, e.g. `\biw` bolds a word (also on a visual selection) |
+| `\h` + motion | highlight (colour: `highlight_color`) |
+| `\m` + motion | wrap in inline MathJax `\( ... \)` |
+| `J` `K` | next / previous field |
+| `{n}gf` | go to field n of the note |
+| `gt` | go to the tag editor; `Esc` returns to the field |
+
+### Surround
+
+As in vim-surround / evil-surround.
+
+| Key | Action |
+| --- | --- |
+| `ys` + motion + char | put brackets or quotes around text: `ysiw)` → `(word)`, `ysiw"` → `"word"` |
+| `yss` + char | around the whole line |
+| `ds` + char | remove them: `ds"`, `ds)` |
+| `cs` + old + new | change them: `cs)]` turns `(x)` into `[x]` |
+| `S` + char | in visual mode: surround the selection |
+
+`(` `[` `{` add a space inside, `)` `]` `}` (or `b` `r` `B`) do not. `c` stands for a cloze: `ysiwc` makes one, `dsc` removes one.
 
 ### Search and commands
 
 | Key | Action |
 | --- | --- |
-| `/text` `?text` | search forward / backward (regular expressions, smart case) |
+| `/text` `?text` | search forward / backward (regular expressions, smart case); in visual mode it extends the selection |
+| `:noh` | hide the search highlight until the next search |
 | `n` `N` `*` `#` | next, previous, word under cursor |
 | `:s/old/new/g` | replace on the current line |
 | `:%s/old/new/g` | replace in the whole field (`\1` and `&` work) |
@@ -119,6 +149,10 @@ Tools > Add-ons > Anki Vim Mode > Config.
 | `cursor_blink` | `false` | blink the cursor |
 | `cursor_color` | `"text"` | cursor colour, the same in every mode: `"text"` (the field's text colour, like reverse video), `"auto"` (a blue that suits a light or dark field) or a CSS colour |
 | `cursor_min_width` | `0` | minimum cursor width in em (e.g. `0.55`) so it is not a sliver on `i` or `l`; `0` = as wide as the letter |
+| `mappings` | `{}` | your own keys for normal and visual mode, e.g. `{"H": "^", "L": "$", ",c": "gciw"}` |
+| `hlsearch` | `true` | mark every match of the last search |
+| `highlight_yank` | `true` | briefly light up yanked text |
+| `highlight_color` | `"#ffff00"` | colour used by `\h` |
 | `enable_in_browser` | `true` | use vim mode in the Browser's editor |
 | `insert_escape` | `""` | two letters such as `"jk"` that leave insert mode when typed quickly |
 | `insert_escape_timeout_ms` | `400` | how quickly they must be typed |

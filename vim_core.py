@@ -35,6 +35,10 @@ DEFAULT_CONFIG = {
     "cursor_color": "text",
     "cursor_blink": False,
     "cursor_min_width": 0,
+    "hlsearch": True,
+    "highlight_yank": True,
+    "highlight_color": "#ffff00",
+    "mappings": {},
 }
 
 HELP_TEXT = """Anki Vim Mode
@@ -60,10 +64,25 @@ EDITING
   "{reg}              use a register       q{reg} @{reg}   record / play macro
   gc gC {motion}      make a cloze deletion (new number / same number)
 
+ANKI
+  gc gC {motion}      cloze deletion       dsc             remove a cloze, keep its text
+  ]c  [c              next / previous cloze
+  \\b \\i \\u {motion}  bold / italic / underline    \\h  highlight
+  \\m {motion}         wrap in MathJax \\( \\)
+  J K  {n}gf          next / previous / n-th field
+  gt                  tag editor (Esc comes back)
+
+SURROUND
+  ys{motion}{char}    add, e.g. ysiw) ysiw"    yss{char}   whole line
+  ds{char}            delete, e.g. ds"         cs{old}{new} change, e.g. cs)]
+  S{char}             in visual mode: surround the selection
+  ( [ {  add a space inside,  ) ] } b r B  do not;  c = cloze
+
 TEXT OBJECTS (after d c y v gc, with i = inner, a = around)
   w W                 word                 " ' `           quotes
   ( [ { <             brackets             p  s            paragraph, sentence
   c                   cloze deletion: cic changes the answer of {{c1::...}}
+  e                   the whole field: yae copies it, dae empties it
 
 VISUAL BLOCK (Ctrl-q)
   I A c               insert/append/change on every line   d y p r ~ u U
@@ -74,7 +93,9 @@ SEARCH AND COMMANDS
   &  g&               repeat substitute    :{n}            go to line n
   :m {n}  :t {n}      move / copy lines    :normal {keys}  run keys on lines
   :w                  add / save note      :wq  :q         and close / close
-  :reg  :marks        show registers / marks
+  :reg  :marks        show registers / marks  :noh         hide search highlight
+
+Your own keys: the "mappings" option, e.g. {"H": "^", "L": "$"}.
 
 A count works in front of most commands: 3dd, 2dw, 5j, d3w, 3., 3ix<Esc>.
 In visual mode Anki's own shortcuts (Ctrl+B, Ctrl+Shift+C ...) act on the

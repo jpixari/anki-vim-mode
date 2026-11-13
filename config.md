@@ -4,9 +4,13 @@ Changes apply to editor windows opened after you press OK.
 - **cursor_color** (`"text"`, `"auto"`, or a CSS colour such as `"#51afef"`): colour of the cursor, the same in every mode. `"text"` uses the field's text colour, like reverse video in a terminal (white on dark fields, black on light ones); `"auto"` is a blue chosen to suit a light or a dark field.
 - **cursor_min_width** (number, in em; `0` = off): fields use a proportional font, so the cursor is as narrow as the letter under it (thin on `i` or `l`). A value such as `0.55` gives it at least that width, at the cost of overlapping the neighbouring letters a little.
 - **enable_in_browser** (`true`/`false`): use vim mode in the Browser's editor. Add Cards and Edit Current always use it.
+- **highlight_color** (a CSS colour): the colour `\\h` highlights text with.
+- **highlight_yank** (`true`/`false`): briefly light up text when it is yanked.
+- **hlsearch** (`true`/`false`): mark every match of the last search (`:noh` hides them until the next search).
 - **insert_escape** (two letters, e.g. `"jk"` or `"jj"`): typing these quickly in insert mode returns to normal mode. Empty (`""`) turns it off.
 - **insert_escape_timeout_ms**: how fast the two letters must be typed, in milliseconds.
 - **jk_display_lines** (`true`/`false`): make `j`/`k` move by lines as they appear on screen (like `gj`/`gk`) instead of by real lines. Useful if your fields are long wrapped paragraphs.
+- **mappings** (pairs of keys): your own keys for normal and visual mode, for example `{"H": "^", "L": "$", ",c": "gciw"}`. The left side is what you type, the right side is what it does (not mapped again). Special keys are written `<Esc>`, `<CR>`, `<BS>`, `<C-x>`.
 - **shift_jk_fields** (`true`/`false`): `J`/`K` jump to the next/previous field. When `false`, `J` joins lines as in vim and `gJ` joins them without adding a space. While `J`/`K` switch fields, `gJ` is the way to join lines (with a space, like vim's `J`).
 - **show_status** (`true`/`false`): show the mode indicator at the bottom of the editor.
 - **status_position** (`"bottom-left"`, `"bottom-right"`, `"top-left"`, `"top-right"`): which corner the mode badge sits in.

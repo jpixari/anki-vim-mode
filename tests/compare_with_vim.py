@@ -81,7 +81,7 @@ CASES = {
         vd|vld|vlld|v$d|vjd|vjjd|vwd|ved|v2ed|vbd|wvbd|vy|vlyP|vjy|Vd|Vjd|
         VGd|jVkd|Vy|VyP|vlc X<Esc>|vecX<Esc>|VcX<Esc>|vlU|veu|v~|vjU|VU|Vu|
         vlrX|vjrX|VrX|vlod|wvlohd|vjJ|VjJ|VjjJ|viwd|vawd|vlvd|vVd|Vvd|
-        vl<Esc>x|vjy|v$y|wvey$p|vex|vlD|vlX|vlY|vlS X<Esc>|vlRX<Esc>|
+        vl<Esc>x|vjy|v$y|wvey$p|vex|vlD|vlX|vlY|vlRX<Esc>|
         vjc X<Esc>|ve<Esc>gvd|Vj<Esc>jgvd
     """),
     "block": (C, """

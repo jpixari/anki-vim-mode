@@ -65,6 +65,10 @@
         cursor_color: "text",
         cursor_blink: false,
         cursor_min_width: 0,
+        hlsearch: true,
+        highlight_yank: true,
+        highlight_color: "#ffff00",
+        mappings: {},
     };
 
     // ======================================================================
@@ -441,6 +445,10 @@
         insertReg: false,
         history: { ":": [], "/": [] },
         visualEol: false,
+        hlsearch: false,
+        maps: [],
+        mapBuf: [],
+        mapping: 0,
         drawQueued: false,
         windowFocused: true,
         cursorKey: "",
@@ -747,6 +755,29 @@
         }
 
         updateStatus();
+    }
+
+    // gt: put the keyboard in Anki's tag editor (Esc comes back).
+    function focusTags() {
+        const target =
+            document.querySelector(".tag-editor .tag-spacer") ||
+            document.querySelector(".tag-spacer") ||
+            document.querySelector(".tag-editor");
+
+        if (!target) {
+            showMessage("No tag editor here");
+            return;
+        }
+
+        for (const type of ["mousedown", "mouseup", "click"]) {
+            target.dispatchEvent(
+                new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true,
+                }),
+            );
+        }
     }
 
     function moveField(delta) {
@@ -1323,39 +1354,44 @@
         return NAMED_KEYS[k] || PASS;
     }
 
+    // \b \i \u \h \m: bold, italic, underline, highlight, MathJax.
+    // ys: surround (reached through y followed by s).
+    const FORMAT_OPS = new Set(["\\b", "\\i", "\\u", "\\h", "\\m"]);
     const OPERATORS = new Set(
-        "d c y gu gU g~ > < gc gC".split(" "),
+        "d c y gu gU g~ > < gc gC ys".split(" ").concat([...FORMAT_OPS]),
     );
     const MOTIONS = new Set(
         (
             "h l j k w W b B e E ge gE 0 ^ $ g_ gg G f F t T ; , { } % | " +
             "n N * # + - _ gj gk <CR> <BS> <Left> <Right> <Up> <Down> " +
-            "<Home> <End> ( ) ` ' H M L <C-d> <C-u> <C-f> <C-b>"
+            "<Home> <End> ( ) ` ' H M L <C-d> <C-u> <C-f> <C-b> ]c [c"
         )
             .split(" ")
             .concat([" "]),
     );
     const CHAR_ARG = new Set(["f", "F", "t", "T", "`", "'"]);
     const JUMP_MOTIONS = new Set(
-        "gg G n N * # % { } ( ) ` ' H M L".split(" "),
+        "gg G n N * # % { } ( ) ` ' H M L ]c [c".split(" "),
     );
     const OBJECT_TYPES = new Set(
-        "w W \" ' ` ( ) b [ ] { } B < > p c s".split(" "),
+        "w W \" ' ` ( ) b [ ] { } B < > p c s e".split(" "),
     );
     const NORMAL_ACTIONS = new Set(
         (
             "i a I A o O x X s S D C Y p P u . v V r ~ J K gJ gv : / ? " +
             "<C-r> <Del> <Esc> <C-[> ZZ ZQ R q @ m gi & g& zz zt zb " +
-            "<C-q> <C-v> <C-a> <C-x> <C-o> <C-i> gp gP"
+            "<C-q> <C-v> <C-a> <C-x> <C-o> <C-i> gp gP gt gf"
         ).split(" "),
     );
     const VISUAL_ACTIONS = new Set(
         (
             "d x X D y Y c s C S R u U ~ gu gU g~ J gJ p P r o v V : " +
-            "<Del> <Esc> <C-[> > < gc gC I A <C-q> <C-v>"
-        ).split(" "),
+            "<Del> <Esc> <C-[> > < gc gC I A <C-q> <C-v> / ?"
+        )
+            .split(" ")
+            .concat([...FORMAT_OPS]),
     );
-    const PREFIX_KEYS = new Set(["g", "Z", "z"]);
+    const PREFIX_KEYS = new Set(["g", "Z", "z", "]", "[", "\\"]);
     // Normal-mode commands followed by one more character.
     const ARG_ACTIONS = new Set(["r", "m", "@", "q"]);
 
@@ -1440,6 +1476,24 @@
             return { status: "done", cmd };
         }
 
+        // The character that names what to surround with (ys, S, cs).
+        function readSur() {
+            if (i >= keys.length) {
+                return INCOMPLETE;
+            }
+
+            const a = keys[i++];
+
+            if (a.length !== 1) {
+                return INVALID;
+            }
+
+            cmd.sur = a;
+            return null;
+        }
+
+        const done = () => (cmd.op === "ys" ? readSur() || finish() : finish());
+
         function readObject(around) {
             if (i >= keys.length) {
                 return INCOMPLETE;
@@ -1463,7 +1517,7 @@
             if (VISUAL_ACTIONS.has(k)) {
                 cmd.action = k;
 
-                if (k === "r") {
+                if (k === "r" || k === "S") {
                     return readArg() || finish();
                 }
 
@@ -1490,6 +1544,35 @@
                 return INVALID;
             }
 
+            // Surround: ds{char}, cs{old}{new}, ys{motion}{char}, yss{char}.
+            if (m === "s" && (k === "d" || k === "c" || k === "y")) {
+                if (k === "d") {
+                    cmd.op = null;
+                    cmd.action = "ds";
+                    return readArg() || finish();
+                }
+
+                if (k === "c") {
+                    cmd.op = null;
+                    cmd.action = "cs";
+                    return readArg() || readSur() || finish();
+                }
+
+                cmd.op = "ys";
+                k = "ys";
+
+                if (i >= keys.length) {
+                    return INCOMPLETE;
+                }
+
+                m = keys[i++];
+
+                if (m === "s") {
+                    cmd.self = true;
+                    return done();
+                }
+            }
+
             // dv{motion}: flip the motion between inclusive and exclusive.
             if (m === "v") {
                 if (i >= keys.length) {
@@ -1514,14 +1597,19 @@
                 m += keys[i++];
             }
 
-            // dd, cc, yy, guu, gUU, g~~ (and gugu, gUgU, g~g~).
-            if (m === k || (k.length === 2 && m === k[1])) {
+            // dd, cc, yy, guu, gUU, g~~ (and gugu, gUgU, g~g~). The \b
+            // family has no doubled form, so \bb is "bold back a word".
+            if (
+                !FORMAT_OPS.has(k) &&
+                k !== "ys" &&
+                (m === k || (k.length === 2 && m === k[1]))
+            ) {
                 cmd.self = true;
                 return finish();
             }
 
             if (m === "i" || m === "a") {
-                return readObject(m === "a") || finish();
+                return readObject(m === "a") || done();
             }
 
             if (!MOTIONS.has(m)) {
@@ -1531,10 +1619,10 @@
             cmd.motion = m;
 
             if (CHAR_ARG.has(m)) {
-                return readArg() || finish();
+                return readArg() || done();
             }
 
-            return finish();
+            return done();
         } else if (NORMAL_ACTIONS.has(k)) {
             cmd.action = k;
 
@@ -1962,6 +2050,32 @@
                 return { pos: T.firstNonBlank(text, p), lw: true };
             }
 
+            case "]c":
+            case "[c": {
+                // Next / previous cloze deletion.
+                const starts = [...text.matchAll(/\{\{c\d+::/g)].map((mm) => mm.index);
+                let p = pos;
+
+                for (let i = 0; i < n; i++) {
+                    const next =
+                        name === "]c"
+                            ? starts.find((s0) => s0 > p)
+                            : [...starts].reverse().find((s0) => s0 < p);
+
+                    if (next === undefined) {
+                        if (i === 0) {
+                            return null;
+                        }
+
+                        break;
+                    }
+
+                    p = next;
+                }
+
+                return { pos: p };
+            }
+
             case "n":
             case "N": {
                 const s = V.lastSearch;
@@ -1973,6 +2087,8 @@
 
                 const forward = name === "n" ? s.forward : !s.forward;
                 const p = T.search(text, s.pattern, pos, forward, n);
+
+                V.hlsearch = true;
 
                 if (p < 0) {
                     showMessage("E486: Pattern not found: " + s.pattern);
@@ -2017,6 +2133,7 @@
                     : escapeRegex(word);
 
                 V.lastSearch = { pattern, forward: name === "*" };
+                V.hlsearch = true;
 
                 const p = T.search(text, pattern, w.start, name === "*", n);
 
@@ -2172,6 +2289,23 @@
             case "s":
                 r = T.sentenceObject(text, pos, a);
                 break;
+            case "e": {
+                // The whole field; "ie" leaves out blank lines at its ends.
+                let s0 = 0;
+                let e0 = text.length;
+
+                if (!a) {
+                    while (s0 < e0 && text[s0] === "\n") {
+                        s0++;
+                    }
+
+                    while (e0 > s0 && text[e0 - 1] === "\n") {
+                        e0--;
+                    }
+                }
+
+                return { start: s0, end: e0, lw: true, anchor: s0 };
+            }
             case "p":
                 r = T.paragraphObject(text, pos, a, count);
                 return r
@@ -2392,12 +2526,139 @@
         return T.clampNormal(m.text, range.anchor);
     }
 
-    function applyOperator(op, range, reg) {
+    // What ys / S / cs put around the text. An opening bracket adds a
+    // space inside, a closing one (or b, B, r, a) does not.
+    const SURROUND = {
+        "(": ["( ", " )"],
+        ")": ["(", ")"],
+        b: ["(", ")"],
+        "[": ["[ ", " ]"],
+        "]": ["[", "]"],
+        r: ["[", "]"],
+        "{": ["{ ", " }"],
+        "}": ["{", "}"],
+        B: ["{", "}"],
+        "<": ["<", ">"],
+        ">": ["<", ">"],
+        a: ["<", ">"],
+    };
+
+    function surroundPair(ch) {
+        return SURROUND[ch] || (/^[^\sA-Za-z0-9]$/.test(ch) ? [ch, ch] : null);
+    }
+
+    // The delimiters around the cursor named by ch (for ds / cs):
+    // { open: [start, end], close: [start, end] } or null.
+    function findSurround(text, pos, ch) {
+        if (ch === "c") {
+            const inner = T.clozeObject(text, pos, false);
+            const around = T.clozeObject(text, pos, true);
+
+            return inner && around
+                ? {
+                      open: [around.start, inner.start],
+                      close: [inner.end, around.end],
+                  }
+                : null;
+        }
+
+        const pair = surroundPair(ch);
+
+        if (!pair) {
+            return null;
+        }
+
+        const o = pair[0][0];
+        const c = pair[1][pair[1].length - 1];
+
+        if (o !== c) {
+            const r = T.pairObject(text, pos, o, c, true);
+
+            if (!r) {
+                return null;
+            }
+
+            const found = {
+                open: [r.start, r.start + 1],
+                close: [r.end - 1, r.end],
+            };
+
+            // An opening bracket as the target also takes the blanks inside.
+            if (pair[0].length > 1) {
+                while (
+                    found.open[1] < found.close[0] &&
+                    /[ \u00a0]/.test(text[found.open[1]])
+                ) {
+                    found.open[1]++;
+                }
+
+                while (
+                    found.close[0] > found.open[1] &&
+                    /[ \u00a0]/.test(text[found.close[0] - 1])
+                ) {
+                    found.close[0]--;
+                }
+            }
+
+            return found;
+        }
+
+        // Quotes and other marks: the nearest pair on the line.
+        const ls = T.lineStart(text, pos);
+        const le = T.lineEnd(text, pos);
+        const quote = T.quoteObject(text, pos, o, false);
+
+        if (quote && text[quote.start - 1] === o && text[quote.end] === o) {
+            return {
+                open: [quote.start - 1, quote.start],
+                close: [quote.end, quote.end + 1],
+            };
+        }
+
+        const left = text.lastIndexOf(o, pos);
+        const right = text.indexOf(o, pos + 1);
+
+        if (left < ls || right === -1 || right >= le) {
+            return null;
+        }
+
+        return { open: [left, left + 1], close: [right, right + 1] };
+    }
+
+    // Leave out blanks at both ends of a range (as gc does).
+    function trimmed(text, range) {
+        let a = range.start;
+        let b = range.end;
+
+        while (b > a && T.isBlankChar(text[b - 1])) {
+            b--;
+        }
+
+        while (a < b && T.isBlankChar(text[a])) {
+            a++;
+        }
+
+        return a < b ? [a, b] : null;
+    }
+
+    // Put `before` and `after` around [a, b) as typed text.
+    function wrapText(a, b, before, after) {
+        setSel(V.model, b, b);
+        typeText(after);
+        remodel();
+        setSel(V.model, a, a);
+        typeText(before);
+        remodel();
+        V.pos = a;
+    }
+
+    function applyOperator(op, range, reg, sur) {
         const m = V.model;
 
         switch (op) {
             case "y": {
                 setRegister(reg, captureRange(m, range), "yank");
+                flashRange(m, range.start, range.end);
 
                 V.pos = afterLinewise(m, range);
 
@@ -2479,6 +2740,64 @@
                 const m2 = remodel();
 
                 V.pos = T.firstNonBlank(m2.text, T.lineStartOf(m2.text, line));
+                break;
+            }
+
+            case "\\b":
+            case "\\i":
+            case "\\u":
+            case "\\h": {
+                // The editor's own formatting commands (as Ctrl+B etc.),
+                // applied to the text of a motion or object.
+                const span = trimmed(m.text, range);
+
+                if (!span) {
+                    break;
+                }
+
+                setSel(m, span[0], span[1]);
+
+                if (op === "\\h") {
+                    exec("styleWithCSS", true);
+
+                    if (!exec("hiliteColor", config.highlight_color)) {
+                        exec("backColor", config.highlight_color);
+                    }
+                } else {
+                    exec(
+                        { "\\b": "bold", "\\i": "italic", "\\u": "underline" }[op],
+                    );
+                }
+
+                remodel();
+                V.pos = span[0];
+                break;
+            }
+
+            case "\\m": {
+                // Inline MathJax: Anki renders \( ... \) when the note loads.
+                const span = trimmed(m.text, range);
+
+                if (span) {
+                    wrapText(span[0], span[1], "\\(", "\\)");
+                }
+
+                break;
+            }
+
+            case "ys": {
+                if (sur === "c") {
+                    applyOperator("gc", range, reg);
+                    return;
+                }
+
+                const pair = surroundPair(sur);
+                const span = trimmed(m.text, range);
+
+                if (pair && span) {
+                    wrapText(span[0], span[1], pair[0], pair[1]);
+                }
+
                 break;
             }
 
@@ -3133,7 +3452,7 @@
                 V.pendingDot = keys;
             }
 
-            applyOperator(cmd.op, range, cmd.reg);
+            applyOperator(cmd.op, range, cmd.reg, cmd.sur);
             V.desiredCol = V.pos - T.lineStart(V.model.text, V.pos);
             return;
         }
@@ -3334,6 +3653,42 @@
                 paste(cmd.action === "P", count, cmd.reg);
                 return;
 
+            case "ds":
+            case "cs": {
+                // Delete / change what surrounds the cursor: ds" cs)] dsc.
+                const found = findSurround(text, pos, cmd.arg);
+                const pair =
+                    cmd.action === "cs" ? surroundPair(cmd.sur) : ["", ""];
+
+                if (!found || !pair) {
+                    return;
+                }
+
+                beginChange(found.open[0]);
+                V.pendingDot = keys;
+                replaceRange(found.close[0], found.close[1], pair[1]);
+                replaceRange(found.open[0], found.open[1], pair[0]);
+                V.pos = found.open[0];
+                return;
+            }
+
+            case "gf": {
+                // {count}gf: go to that field of the note (1 = first).
+                const target = allFields()[count - 1];
+
+                if (target) {
+                    focusField(target);
+                } else {
+                    showMessage("No field " + count);
+                }
+
+                return;
+            }
+
+            case "gt":
+                focusTags();
+                return;
+
             case "gp":
             case "gP":
                 // Like p / P, but leave the cursor just after the new text.
@@ -3508,6 +3863,13 @@
             return;
         }
 
+        if (cmd.action === "/" || cmd.action === "?") {
+            // Extend the selection to a search match.
+            openCmdline(cmd.action, "");
+            V.cmdline.count = cmd.count || 1;
+            return;
+        }
+
         if (V.mode === "vblock") {
             executeBlock(cmd);
             return;
@@ -3536,7 +3898,7 @@
                 beginChange();
             }
 
-            applyOperator(op, r, cmd.reg);
+            applyOperator(op, r, cmd.reg, cmd.arg);
 
             if (!inInsert()) {
                 setModeNormal();
@@ -3585,7 +3947,17 @@
             case "<":
             case "gc":
             case "gC":
+            case "\\b":
+            case "\\i":
+            case "\\u":
+            case "\\h":
+            case "\\m":
                 run(cmd.action, range);
+                return;
+
+            case "S":
+                // Surround the selection (as vim-surround / evil-surround).
+                run("ys", range);
                 return;
 
             case "I":
@@ -4091,7 +4463,89 @@
         }
     }
 
+    // Keys typed so far can still be the start of a mapped key: only at
+    // the start of a command, or right after an operator (so dH works).
+    function mappable() {
+        if (V.keys.length === 0) {
+            return true;
+        }
+
+        return /^\d*(d|c|y|g[uU~cC]|[<>]|\\[biuhm])\d*$/.test(V.keys.join(""));
+    }
+
+    // User key mappings (config "mappings"), applied in normal and visual
+    // mode. The right-hand side is not mapped again.
     function feedKey(key) {
+        if (
+            V.maps.length === 0 ||
+            V.mapping > 0 ||
+            V.replaying ||
+            (V.mapBuf.length === 0 && !mappable())
+        ) {
+            feedKeyRaw(key);
+            return;
+        }
+
+        V.mapBuf.push(key);
+
+        const buf = V.mapBuf;
+        const startsWith = (lhs) => buf.every((k, i) => lhs[i] === k);
+        const candidates = V.maps.filter(
+            (mp) => mp.lhs.length >= buf.length && startsWith(mp.lhs),
+        );
+        const exact = candidates.find((mp) => mp.lhs.length === buf.length);
+
+        if (exact && candidates.length === 1) {
+            V.mapBuf = [];
+            runMapped(exact.rhs);
+            return;
+        }
+
+        if (candidates.length > 0) {
+            // Could still become a longer mapping: wait for the next key.
+            return;
+        }
+
+        // Not a mapping after all. Use the longest mapping the keys start
+        // with, if any, and handle the rest as fresh keys.
+        V.mapBuf = [];
+
+        const best = V.maps
+            .filter(
+                (mp) =>
+                    mp.lhs.length < buf.length &&
+                    mp.lhs.every((k, i) => buf[i] === k),
+            )
+            .sort((x, y) => y.lhs.length - x.lhs.length)[0];
+
+        if (best) {
+            runMapped(best.rhs);
+
+            for (const k of buf.slice(best.lhs.length)) {
+                dispatchKey(k);
+            }
+        } else {
+            feedKeyRaw(buf[0]);
+
+            for (const k of buf.slice(1)) {
+                dispatchKey(k);
+            }
+        }
+    }
+
+    function runMapped(keys) {
+        V.mapping++;
+
+        try {
+            for (const k of keys) {
+                dispatchKey(k);
+            }
+        } finally {
+            V.mapping--;
+        }
+    }
+
+    function feedKeyRaw(key) {
         if (key === "<Esc>" || key === "<C-[>") {
             if (V.keys.length > 0) {
                 V.keys = [];
@@ -4190,7 +4644,7 @@
         const c = V.cmdline;
 
         if (key === "<Esc>" || key === "<C-[>" || key === "<C-c>") {
-            if (isVisual()) {
+            if (isVisual() && c.type === ":") {
                 setModeNormal();
             }
 
@@ -4439,6 +4893,7 @@
             }
 
             V.lastSearch = { pattern, forward };
+            V.hlsearch = true;
 
             const times =
                 (pendingOp && pendingOp.cmd.count) || searchCount || 1;
@@ -4698,6 +5153,7 @@
 
             case "noh":
             case "nohlsearch":
+                V.hlsearch = false;
                 return;
 
             case "u":
@@ -5031,6 +5487,124 @@
             : "";
     }
 
+    // Rectangles on screen for the text [a, b), cut to the visible area.
+    function rectsFor(m, a, b, area) {
+        const out = [];
+
+        if (a >= b) {
+            return out;
+        }
+
+        const range = document.createRange();
+
+        try {
+            const pa = domPos(m, a, true);
+            const pb = domPos(m, b);
+
+            range.setStart(pa.n, pa.o);
+            range.setEnd(pb.n, pb.o);
+        } catch (error) {
+            return out;
+        }
+
+        for (const rect of range.getClientRects()) {
+            if (rect.width <= 0 || rect.height <= 0) {
+                continue;
+            }
+
+            const clip = clipTo(
+                area,
+                rect.left,
+                rect.top,
+                rect.width,
+                rect.height,
+            );
+
+            if (clip !== null) {
+                out.push({ rect, clip });
+            }
+        }
+
+        return out;
+    }
+
+    function overlay(id) {
+        let box = document.getElementById(id);
+
+        if (!box) {
+            box = document.createElement("div");
+            box.id = id;
+            document.body.appendChild(box);
+        }
+
+        return box;
+    }
+
+    function paintRects(box, rects) {
+        for (const { rect, clip } of rects) {
+            const div = document.createElement("div");
+
+            div.style.left = rect.left + "px";
+            div.style.top = rect.top + "px";
+            div.style.width = rect.width + "px";
+            div.style.height = rect.height + "px";
+            div.style.clipPath = clip;
+            box.appendChild(div);
+        }
+    }
+
+    // All matches of the last search, like Vim's 'hlsearch' (:noh hides
+    // them until the next search).
+    function drawSearch() {
+        const box = overlay("anki-vim-search");
+
+        box.textContent = "";
+
+        const m = V.model;
+
+        if (
+            !config.hlsearch ||
+            !V.hlsearch ||
+            !V.lastSearch ||
+            !V.windowFocused ||
+            inInsert() ||
+            !m ||
+            activeField() !== m.root
+        ) {
+            return;
+        }
+
+        let matches;
+
+        try {
+            matches = T.allMatches(m.text, T.makeRegex(V.lastSearch.pattern));
+        } catch (error) {
+            return;
+        }
+
+        const area = visibleArea(m.root);
+
+        for (const match of matches.slice(0, 300)) {
+            paintRects(box, rectsFor(m, match.start, match.end, area));
+        }
+    }
+
+    // Briefly light up text that was just yanked.
+    function flashRange(m, a, b) {
+        if (!config.highlight_yank || V.replaying || V.playing > 0) {
+            return;
+        }
+
+        const box = overlay("anki-vim-flash");
+
+        box.textContent = "";
+        paintRects(box, rectsFor(m, a, b, visibleArea(m.root)));
+        clearTimeout(V.flashTimer);
+        V.flashTimer = setTimeout(() => {
+            box.textContent = "";
+        }, 200);
+    }
+
     // Visual block has no native equivalent (a browser selection is one
     // continuous range), so its rectangles are drawn as an overlay.
     function drawBlockSelection() {
@@ -5106,6 +5680,7 @@
 
     function drawCursor(allowScroll) {
         drawBlockSelection();
+        drawSearch();
 
         let el = V.cursorEl;
 
@@ -5626,7 +6201,7 @@
     // (otherwise Esc would close the Add Cards window).
     function escape() {
         if (V.cmdline) {
-            if (isVisual()) {
+            if (isVisual() && V.cmdline.type === ":") {
                 setModeNormal();
             }
 
@@ -5649,6 +6224,27 @@
                         composed: true,
                     }),
                 );
+
+                // Esc in the tag editor comes back to the field (see gt).
+                if (
+                    a.classList &&
+                    a.classList.contains("tag-input") &&
+                    V.lastField &&
+                    V.lastField.isConnected
+                ) {
+                    const back = V.lastField;
+                    const where = V.posMemo.get(back) || 0;
+
+                    setTimeout(() => focusField(back, where), 30);
+                    // Anki puts its own caret back a moment later: return
+                    // to where the cursor was once that has happened.
+                    setTimeout(() => {
+                        if (activeField() === back && V.mode === "normal" && remodel()) {
+                            V.pos = T.clampNormal(V.model.text, where);
+                            placeCursor();
+                        }
+                    }, 250);
+                }
             }
 
             return;
@@ -5799,6 +6395,24 @@
             }
         }
 
+        V.maps = [];
+        V.mapBuf = [];
+
+        const mappings = config.mappings;
+
+        if (mappings && typeof mappings === "object") {
+            for (const lhs of Object.keys(mappings)) {
+                const rhs = mappings[lhs];
+
+                if (lhs && typeof rhs === "string" && rhs) {
+                    V.maps.push({
+                        lhs: tokenizeKeys(lhs),
+                        rhs: tokenizeKeys(rhs),
+                    });
+                }
+            }
+        }
+
         updateStatus();
     }
 
@@ -5845,6 +6459,8 @@
             V.redo.length = 0;
             V.change = null;
             V.stamp = null;
+            // A new note: the old search's highlights do not carry over.
+            V.hlsearch = false;
             redrawSoon();
         },
         setMode: function (mode) {

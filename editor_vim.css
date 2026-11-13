@@ -123,6 +123,23 @@ body[data-anki-vim-mode="replace"] #anki-vim-status .anki-vim-badge {
   }
 }
 
+/* Matches of the last search (hlsearch) and the flash on yank. */
+#anki-vim-search > div,
+#anki-vim-flash > div {
+  position: fixed;
+  z-index: 2147483644;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+#anki-vim-search > div {
+  background: rgba(255, 196, 0, 0.38);
+}
+
+#anki-vim-flash > div {
+  background: rgba(81, 175, 239, 0.45);
+}
+
 /* Visual-block selection rectangles. */
 #anki-vim-block-select > div {
   position: fixed;
